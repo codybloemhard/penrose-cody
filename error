@@ -1,0 +1,23 @@
+warning: unused import: `WindowManager`
+ --> src/main.rs:8:45
+  |
+8 |      Backward, Config, Forward, Less, More, WindowManager
+  |                                             ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: 1 warning emitted
+
+    Finished dev [unoptimized + debuginfo] target(s) in 0.02s
+     Running `./penrose-cody`
+thread 'main' panicked at 'invalid key binding: M-j', src/main.rs:12:25
+stack backtrace:
+   0: rust_begin_unwind
+             at /rustc/e1884a8e3c3e813aada8254edfa120e85bf5ffca/library/std/src/panicking.rs:495:5
+   1: std::panicking::begin_panic_fmt
+             at /rustc/e1884a8e3c3e813aada8254edfa120e85bf5ffca/library/std/src/panicking.rs:437:5
+   2: penrose_cody::main
+             at /home/cody/git/penrose-cody/src/main.rs:12:25
+   3: core::ops::function::FnOnce::call_once
+             at /rustc/e1884a8e3c3e813aada8254edfa120e85bf5ffca/library/core/src/ops/function.rs:227:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
