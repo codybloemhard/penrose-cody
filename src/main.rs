@@ -21,7 +21,7 @@ use penrose::{
 };
 
 fn main() -> penrose::Result<()> {
-    let sp = Scratchpad::new("st", 0.8, 0.8);
+    let sp = Scratchpad::new("st", 0.9, 0.9);
 
     let hooks: Hooks<_> = vec![
         sp.get_hook(),
@@ -37,7 +37,7 @@ fn main() -> penrose::Result<()> {
         "M-Tab" => run_internal!(cycle_workspace, Forward);
         "M-a" => run_internal!(cycle_layout, Forward);
         "M-S-a" => run_internal!(cycle_layout, Backward);
-        "M-BackSpace" => sp.toggle();
+        "M-space" => sp.toggle();
         "M-h" => run_external!("dmenu_run");
         "M-b" => run_external!("st");
         "M-j" => run_external!("firefox");
@@ -47,6 +47,11 @@ fn main() -> penrose::Result<()> {
             "M-{}" => focus_workspace [ index_selectors(9) ];
             "M-S-{}" => client_to_workspace [ index_selectors(9) ];
         };
+
+        // map: { "q", "g", "m", "l", "w", "y" } to index_selectors(6) => {
+        //     "M-{}" => focus_workspace (REF);
+        //     "M-S-{}" => client_to_workspace (REF);
+        // };
     };
 
     fn my_layouts() -> Vec<Layout> {
@@ -69,9 +74,10 @@ fn main() -> penrose::Result<()> {
     let config = Config::default().builder()
         .floating_classes(vec!["dmenu"])
         .gap_px(10)
+        // .outer_gap(50)
         .border_px(4)
-        .focused_border(0x888888)
-        .unfocused_border(0x000000)
+        // .focused_border(0x888888)
+        // .unfocused_border(0x000000)
         .show_bar(true)
         .top_bar(true)
         .bar_height(26)

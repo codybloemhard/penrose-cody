@@ -1,0 +1,36 @@
+
+### Describe the bug
+
+Firstly I could not make out if this is supposed to happen or not, so it might not be a bug but a feature.
+When using a compositor (i use Picom) windows that have a transparent background (like my terminal) will have a transparent border too. Windows that do not have a transparent background do not have a transparent border. This gives a inconsistent look.
+
+### To Reproduce
+in my .xinitrc:
+```
+picom --xrender-sync-fence &> /dev/null &
+git/penrose-cody/target/debug/penrose-cody
+```
+Open windows of both types, firefox and st in my case.
+
+### Expected behavior
+
+Either the borders are all opaque or one can choose whether opaque borders are allowed.
+
+### Screenshots
+
+If applicable, add screenshots to help explain your problem.
+
+### Versions & OS Details
+
+- OS: Linux
+- Distribution Artix
+- OS Version 5.10.16-artix1-1
+- Penrose Version 21e16e52230dc7792f458137657e9c23b610ab07
+
+### Additional context
+
+- [x] minimal main.rs that reproduces the issue
+- [ ] debug log output
+- [ ] output of running `xmodmap -pke` (for keybinding issues)
+
+
