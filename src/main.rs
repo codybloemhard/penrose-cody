@@ -1,94 +1,105 @@
-#[macro_use]
-extern crate penrose;
+// #[macro_use]
+// extern crate penrose;
 
 use penrose::{
-    contrib::{
-        actions::create_or_switch_to_workspace,
-        extensions::{Scratchpad},
-        layouts::paper,
+    builtin::{
+        actions::{
+            floating::sink_focused,
+            exit, modify_with, send_layout_message, spawn,
+        },
+        layout::messages::{ ExpandMain, ShrinkMain },
+        layout::MainAndStack,
+        layout::transformers::{ ReserveTop, Gaps },
     },
     core::{
-        bindings::KeyEventHandler,
-        config::Config,
-        helpers::index_selectors,
-        hooks::Hooks,
-        layout::{bottom_stack, side_stack, Layout, LayoutConf},
-        xconnection::XConn,
+        layout::LayoutStack,
+        bindings::{
+            parse_keybindings_with_xmodmap, KeyEventHandler, MouseEventHandler,
+            MouseState, MouseEventKind
+        },
+        Config, WindowManager,
     },
-    logging_error_handler,
-    xcb::new_xcb_backed_window_manager,
-    Backward, Forward, Less, More, WindowManager, Selector::Focused, Result,
+    extensions::{
+        actions::{ toggle_fullscreen },
+        hooks::add_ewmh_hooks,
+    },
+    stack,
+    Color,
+    map,
+    x11rb::RustConn,
+    Result,
 };
 
-fn main() -> penrose::Result<()> {
-    let sp = Scratchpad::new("st", 0.9, 0.9);
+use std::collections::HashMap;
 
-    let hooks: Hooks<_> = vec![
-        sp.get_hook(),
-    ];
+fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
+    let mut raw_bindings = map! {
+        map_keys: |k: &str| k.to_string();
 
-    let key_bindings = gen_keybindings! {
-        "M-u" => run_internal!(cycle_client, Forward);
-        "M-e" => run_internal!(cycle_client, Backward);
-        "M-S-u" => run_internal!(drag_client, Forward);
-        "M-S-e" => run_internal!(drag_client, Backward);
-        "M-f" => run_internal!(kill_client);
-        "M-n" => run_internal!(toggle_client_fullscreen, &Focused);
-        "M-Tab" => run_internal!(cycle_workspace, Forward);
-        "M-a" => run_internal!(cycle_layout, Forward);
-        "M-S-a" => run_internal!(cycle_layout, Backward);
-        "M-space" => sp.toggle();
-        "M-h" => run_external!("dmenu_run");
-        "M-b" => run_external!("st");
-        "M-j" => run_external!("firefox");
-        "M-S-d" => run_internal!(exit);
-
-        refmap [ 1..10 ] in {
-            "M-{}" => focus_workspace [ index_selectors(9) ];
-            "M-S-{}" => client_to_workspace [ index_selectors(9) ];
-        };
-
-        // map: { "q", "g", "m", "l", "w", "y" } to index_selectors(6) => {
-        //     "M-{}" => focus_workspace (REF);
-        //     "M-S-{}" => client_to_workspace (REF);
-        // };
+        "M-S-t" => exit(),
+        "M-h" => spawn("dmenu_run"),
+        "M-b" => spawn("st"),
+        "M-j" => spawn("firefox"),
+        "M-S-j" => spawn("firefox --private-window"),
+        "M-f" => modify_with(|cs| cs.kill_focused()),
+        // "M-S-f" => modify_with(|cs| cs.sink_focused()),
+        "M-o" => modify_with(|cs| cs.focus_down()),
+        "M-a" => modify_with(|cs| cs.focus_up()),
+        "M-S-o" => modify_with(|cs| cs.swap_down()),
+        "M-S-a" => modify_with(|cs| cs.swap_up()),
+        // "M-bracketright" => modify_with(|cs| cs.next_screen()),
+        // "M-bracketleft" => modify_with(|cs| cs.previous_screen()),
+        "M-S-k" => send_layout_message(|| ExpandMain),
+        "M-S-p" => send_layout_message(|| ShrinkMain),
     };
 
-    fn my_layouts() -> Vec<Layout> {
-        let n_main = 1;
-        let ratio = 0.5;
-        let follow_focus_conf = LayoutConf {
-            floating: false,
-            gapless: false,
-            follow_focus: true,
-            allow_wrapping: false,
-        };
-
-        vec![
-            Layout::new("[side]", LayoutConf::default(), side_stack, n_main, ratio),
-            Layout::new("[papr]", follow_focus_conf, paper, n_main, ratio),
-            Layout::floating("[float]"),
-        ]
+    for tag in &["q", "g", "m", "l", "w"] {
+        raw_bindings.extend([
+            (
+                format!("M-{tag}"),
+                modify_with(move |client_set| client_set.focus_tag(tag)),
+            ),
+            (
+                format!("M-S-{tag}"),
+                modify_with(move |client_set| client_set.move_focused_to_tag(tag)),
+            ),
+        ]);
     }
 
-    let config = Config::default().builder()
-        .floating_classes(vec!["dmenu"])
-        .gap_px(10)
-        // .outer_gap(50)
-        .border_px(4)
-        // .focused_border(0x888888)
-        // .unfocused_border(0x000000)
-        .show_bar(true)
-        .top_bar(true)
-        .bar_height(26)
-        .layouts(my_layouts())
-        .build()
-        .expect("failed to build config");
+    raw_bindings
+}
 
-    let mut wm = new_xcb_backed_window_manager(
-        config,
-        hooks,
-        logging_error_handler()
-    )?;
-    wm.grab_keys_and_run(key_bindings, map!{})
+fn mouse_bindings() -> HashMap<(MouseEventKind, MouseState), Box<dyn MouseEventHandler<RustConn>>> {
+    map! {}
+}
+
+fn layouts() -> LayoutStack {
+    let gap_outer = 2;
+    let gap_inner = 4;
+    let bar_height = 24;
+    stack!(
+        MainAndStack::side(1, 0.5, 0.05)
+    )
+    .map(|l| ReserveTop::wrap(Gaps::wrap(l, gap_outer, gap_inner), bar_height))
+}
+
+fn main() -> Result<()> {
+    let conn = RustConn::new()?;
+    let key_bindings = parse_keybindings_with_xmodmap(raw_key_bindings())?;
+
+    let config = add_ewmh_hooks(Config{
+        normal_border: Color::new_from_hex(0x000000FF),
+        focused_border: Color::new_from_hex(0xFF000000),
+        border_width: 2,
+        focus_follow_mouse: true,
+        tags: vec!["q".to_string(), "g".to_string(), "m".to_string(), "l".to_string(), "w".to_string()],
+        floating_classes: vec!["ffplay".to_string()],
+        default_layouts: layouts(),
+        // startup_hook: Some(SpawnOnStartup::boxed("~/scripts/.theme/run-shapebar")),
+        ..Default::default()
+    });
+
+    let wm = WindowManager::new(config, key_bindings, mouse_bindings(), conn)?;
+
+    wm.run()
 }
