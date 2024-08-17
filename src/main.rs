@@ -1,11 +1,7 @@
-// #[macro_use]
-// extern crate penrose;
-
 use penrose::{
     builtin::{
         actions::{
-            floating::sink_focused,
-            exit, modify_with, send_layout_message, spawn,
+            exit, modify_with, send_layout_message, spawn, key_handler,
         },
         layout::messages::{ ExpandMain, ShrinkMain },
         layout::MainAndStack,
@@ -14,15 +10,17 @@ use penrose::{
     core::{
         layout::LayoutStack,
         bindings::{
-            parse_keybindings_with_xmodmap, KeyEventHandler, MouseEventHandler,
-            MouseState, MouseEventKind
+            parse_keybindings_with_xmodmap, KeyEventHandler,
         },
-        Config, WindowManager,
+        Config, WindowManager, State,
     },
     extensions::{
         actions::{ toggle_fullscreen },
-        hooks::add_ewmh_hooks,
+        hooks::{ add_ewmh_hooks },
     },
+    x::{ XConn, XConnExt, query::AppName },
+    pure::geometry::Rect,
+    Xid,
     stack,
     Color,
     map,
@@ -42,7 +40,8 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-j" => spawn("firefox"),
         "M-S-j" => spawn("firefox --private-window"),
         "M-f" => modify_with(|cs| cs.kill_focused()),
-        // "M-S-f" => modify_with(|cs| cs.sink_focused()),
+        "M-S-f" => toggle_floating_focused_remember(),
+        "M-n" => toggle_fullscreen(),
         "M-o" => modify_with(|cs| cs.focus_down()),
         "M-a" => modify_with(|cs| cs.focus_up()),
         "M-S-o" => modify_with(|cs| cs.swap_down()),
@@ -53,7 +52,7 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-S-p" => send_layout_message(|| ShrinkMain),
     };
 
-    for tag in &["q", "g", "m", "l", "w"] {
+    for tag in &["g", "m", "l", "w"] {
         raw_bindings.extend([
             (
                 format!("M-{tag}"),
@@ -69,10 +68,6 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
     raw_bindings
 }
 
-fn mouse_bindings() -> HashMap<(MouseEventKind, MouseState), Box<dyn MouseEventHandler<RustConn>>> {
-    map! {}
-}
-
 fn layouts() -> LayoutStack {
     let gap_outer = 2;
     let gap_inner = 4;
@@ -83,23 +78,73 @@ fn layouts() -> LayoutStack {
     .map(|l| ReserveTop::wrap(Gaps::wrap(l, gap_outer, gap_inner), bar_height))
 }
 
+fn bar_hook<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
+    if x.query_or(false, &AppName("shapebar"), id)
+    {
+        let _ = x.set_client_border_color(id, Color::new_from_hex(0x000000FF));
+        // let _ = x.modify_and_refresh(state, |cs| { cs.remove_client(&id); });
+        // let mut geo = x.client_geometry(id)?;
+        // geo.x = 0;
+        // geo.y = 0;
+        // let new_geo = Rect { x: 0, y: 0, ..geo };
+        // x.position_client(id, geo)?;
+        let _ = x.refresh(state);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+struct OgWindowSize {
+    pub map: HashMap<Xid, (u32, u32)>,
+}
+
+fn og_window_size_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
+    let rect = x.client_geometry(id)?;
+    let ows = state.extension::<OgWindowSize>()?;
+    ows.borrow_mut().map.insert(id, (rect.w, rect.h));
+    Ok(())
+}
+
+pub fn toggle_floating_focused_remember<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
+    key_handler(|state, x: &X| {
+        let id = match state.client_set.current_client() {
+            Some(&id) => id,
+            None => return Ok(()),
+        };
+        let screen_rect = state.client_set.current_screen().geometry();
+
+        let ows = state.extension::<OgWindowSize>()?;
+        let (w, h) = *ows.borrow().map.get(&id).unwrap_or(&(512, 512));
+        let r = Rect { x: 0, y: 0, w, h };
+        let r = r.centered_in(&screen_rect).unwrap_or(r);
+
+        x.modify_and_refresh(state, |cs| {
+            let _ = cs.toggle_floating_state(id, r);
+        })
+    })
+}
+
 fn main() -> Result<()> {
     let conn = RustConn::new()?;
     let key_bindings = parse_keybindings_with_xmodmap(raw_key_bindings())?;
 
-    let config = add_ewmh_hooks(Config{
-        normal_border: Color::new_from_hex(0x000000FF),
-        focused_border: Color::new_from_hex(0xFF000000),
+    let mut config = add_ewmh_hooks(Config{
+        normal_border: Color::new_from_hex(0x414868FF),
+        focused_border: Color::new_from_hex(0xF7768EFF),
         border_width: 2,
         focus_follow_mouse: true,
-        tags: vec!["q".to_string(), "g".to_string(), "m".to_string(), "l".to_string(), "w".to_string()],
-        floating_classes: vec!["ffplay".to_string()],
+        tags: vec!["g".to_string(), "m".to_string(), "l".to_string(), "w".to_string()],
+        floating_classes: vec!["ffplay".to_string(), "shapebar".to_string()],
         default_layouts: layouts(),
         // startup_hook: Some(SpawnOnStartup::boxed("~/scripts/.theme/run-shapebar")),
         ..Default::default()
     });
 
-    let wm = WindowManager::new(config, key_bindings, mouse_bindings(), conn)?;
+    config.compose_or_set_manage_hook(og_window_size_manage);
+    config.compose_or_set_manage_hook(bar_hook);
+
+    let mut wm = WindowManager::new(config, key_bindings, HashMap::new(), conn)?;
+    wm.state.add_extension(OgWindowSize::default());
 
     wm.run()
 }
