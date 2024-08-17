@@ -8,7 +8,7 @@ use penrose::{
         layout::transformers::{ ReserveTop, Gaps },
     },
     core::{
-        layout::LayoutStack,
+        layout::{ Layout, LayoutStack, Message },
         bindings::{
             parse_keybindings_with_xmodmap, KeyEventHandler,
         },
@@ -19,7 +19,7 @@ use penrose::{
         hooks::{ add_ewmh_hooks },
     },
     x::{ XConn, XConnExt, query::AppName },
-    pure::geometry::Rect,
+    pure::{ Stack, geometry::Rect },
     Xid,
     stack,
     Color,
@@ -46,6 +46,7 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-a" => modify_with(|cs| cs.focus_up()),
         "M-S-o" => modify_with(|cs| cs.swap_down()),
         "M-S-a" => modify_with(|cs| cs.swap_up()),
+        "M-S-q" => modify_with(|cs| cs.next_layout()),
         // "M-bracketright" => modify_with(|cs| cs.next_screen()),
         // "M-bracketleft" => modify_with(|cs| cs.previous_screen()),
         "M-S-k" => send_layout_message(|| ExpandMain),
@@ -73,7 +74,8 @@ fn layouts() -> LayoutStack {
     let gap_inner = 4;
     let bar_height = 24;
     stack!(
-        MainAndStack::side(1, 0.5, 0.05)
+        MainAndStack::side(1, 0.5, 0.05),
+        Cols::boxed()
     )
     .map(|l| ReserveTop::wrap(Gaps::wrap(l, gap_outer, gap_inner), bar_height))
 }
@@ -82,13 +84,13 @@ fn bar_hook<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<
     if x.query_or(false, &AppName("shapebar"), id)
     {
         let _ = x.set_client_border_color(id, Color::new_from_hex(0x000000FF));
-        // let _ = x.modify_and_refresh(state, |cs| { cs.remove_client(&id); });
+        let _ = x.modify_and_refresh(state, |cs| { cs.remove_client(&id); });
         // let mut geo = x.client_geometry(id)?;
         // geo.x = 0;
         // geo.y = 0;
-        // let new_geo = Rect { x: 0, y: 0, ..geo };
+        // // let new_geo = Rect { x: 0, y: 0, ..geo };
         // x.position_client(id, geo)?;
-        let _ = x.refresh(state);
+        // let _ = x.refresh(state);
     }
     Ok(())
 }
@@ -124,6 +126,43 @@ pub fn toggle_floating_focused_remember<X: XConn>() -> Box<dyn KeyEventHandler<X
     })
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct Cols;
+
+impl Cols {
+    pub fn boxed() -> Box<dyn Layout> { Box::new(Self) }
+}
+
+impl Layout for Cols {
+    fn name(&self) -> String { "cols".to_string() }
+    fn boxed_clone(&self) -> Box<dyn Layout> { Box::new(self.clone()) }
+
+    fn layout(&mut self, s: &Stack<Xid>, rect: Rect) -> (Option<Box<dyn Layout>>, Vec<(Xid, Rect)>) {
+        let mut l: Option<Xid> = None;
+        let mut r: Option<Xid> = None;
+        let mut ps = Vec::with_capacity(2);
+
+        for id in s {
+            if l.is_none() { l = Some(*id); }
+            else if r.is_none() { r = Some(*id); }
+        }
+
+        if let (Some(l), Some(r)) = (l, r) {
+            let (lr, rr) = rect.split_at_width_perc(0.5).expect("could not split rings rec");
+            ps.push((l, lr));
+            ps.push((r, rr));
+        } else if let Some(l) = l {
+            ps.push((l, rect));
+        }
+
+        (None, ps)
+    }
+
+    fn handle_message(&mut self, _: &Message) -> Option<Box<dyn Layout>> {
+        None
+    }
+}
+
 fn main() -> Result<()> {
     let conn = RustConn::new()?;
     let key_bindings = parse_keybindings_with_xmodmap(raw_key_bindings())?;
@@ -131,10 +170,10 @@ fn main() -> Result<()> {
     let mut config = add_ewmh_hooks(Config{
         normal_border: Color::new_from_hex(0x414868FF),
         focused_border: Color::new_from_hex(0xF7768EFF),
-        border_width: 2,
+        border_width: 1,
         focus_follow_mouse: true,
         tags: vec!["g".to_string(), "m".to_string(), "l".to_string(), "w".to_string()],
-        floating_classes: vec!["ffplay".to_string(), "shapebar".to_string()],
+        floating_classes: vec!["ffplay".to_string(), "notshapebar".to_string()],
         default_layouts: layouts(),
         // startup_hook: Some(SpawnOnStartup::boxed("~/scripts/.theme/run-shapebar")),
         ..Default::default()
