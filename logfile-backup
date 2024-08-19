@@ -1,0 +1,47 @@
+
+X.Org X Server 1.21.1.13
+X Protocol Version 11, Revision 0
+Current Operating System: Linux mememan 6.10.3-artix1-2 #1 SMP PREEMPT_DYNAMIC Wed, 07 Aug 2024 06:00:42 +0000 x86_64
+Kernel command line: BOOT_IMAGE=/vmlinuz-linux root=UUID=66b73db3-9a20-4859-ba49-ca7c23625307 rw loglevel=3 quiet
+ 
+Current version of pixman: 0.43.4
+	Before reporting problems, check http://wiki.x.org
+	to make sure that you have the latest version.
+Markers: (--) probed, (**) from config file, (==) default setting,
+	(++) from command line, (!!) notice, (II) informational,
+	(WW) warning, (EE) error, (NI) not implemented, (??) unknown.
+(==) Log file: "/var/log/Xorg.1.log", Time: Mon Aug 19 21:41:40 2024
+(==) Using system config directory "/usr/share/X11/xorg.conf.d"
+[ 08/19/2024 21:41:41.896 parse_config_libconfig WARN ] The refresh-rate option has been deprecated. Please remove it from your configuration file. If you encounter any problems without this feature, please feel free to open a bug report
+thread 'main' panicked at src/main.rs:295:23:
+already mutably borrowed: BorrowError
+stack backtrace:
+   0:     0x5c416a1e1d65 - <std::sys_common::backtrace::_print::DisplayBacktrace as core::fmt::Display>::fmt::h3692694645b1bb6a
+   1:     0x5c416a2046cb - core::fmt::write::h5131d80b4c69b88d
+   2:     0x5c416a1df22f - std::io::Write::write_fmt::h1fb327a7d8b0eb36
+   3:     0x5c416a1e1b3e - std::sys_common::backtrace::print::h998d75b840f75a73
+   4:     0x5c416a1e2ed9 - std::panicking::default_hook::{{closure}}::h18ec7fe6a38b9da0
+   5:     0x5c416a1e2c7a - std::panicking::default_hook::hfb3f22c2e4075a6a
+   6:     0x5c416a1e3373 - std::panicking::rust_panic_with_hook::h51af00bcb4660c4e
+   7:     0x5c416a1e3254 - std::panicking::begin_panic_handler::{{closure}}::h39f76aa863fbe8ce
+   8:     0x5c416a1e2229 - std::sys_common::backtrace::__rust_end_short_backtrace::h4d10fc2251b89840
+   9:     0x5c416a1e2f87 - rust_begin_unwind
+  10:     0x5c416a148ec3 - core::panicking::panic_fmt::h319840fcbcd912ef
+  11:     0x5c416a148e03 - core::cell::panic_already_mutably_borrowed::h7cda7b402c23a446
+  12:     0x5c416a168243 - <F as penrose::core::hooks::StateHook<X>>::call::h1fe9f52f3f709d0a
+  13:     0x5c416a1893f7 - <penrose::core::hooks::ComposedStateHook<X> as penrose::core::hooks::StateHook<X>>::call::h36afbfcbad3b23a3
+  14:     0x5c416a151ee3 - penrose::x::XConnExt::modify_and_refresh::h618a1d07758232cc
+  15:     0x5c416a16964d - <F as penrose::core::bindings::KeyEventHandler<X>>::call::hf1c18b8fbe0dd0d0
+  16:     0x5c416a193773 - penrose::core::handle::keypress::h6d36ffbfcd0cfcc4
+  17:     0x5c416a162c7f - penrose::core::WindowManager<X>::run::h1cbdda137e35af3d
+  18:     0x5c416a16c3c7 - penrose_cody::main::h1efa72eb95644273
+  19:     0x5c416a185946 - std::sys_common::backtrace::__rust_begin_short_backtrace::h1c2cb418e0539185
+  20:     0x5c416a1894e8 - std::rt::lang_start::{{closure}}::h47ff21576ae356b7
+  21:     0x5c416a1db87d - std::rt::lang_start_internal::h63a185b0ddd212e9
+  22:     0x5c416a16c925 - main
+  23:     0x7c85851c5d6e - <unknown>
+  24:     0x7c85851c5e2a - __libc_start_main
+  25:     0x5c416a149615 - _start
+  26:                0x0 - <unknown>
+X connection to :1 broken (explicit kill or server shutdown).
+(II) Server terminated successfully (0). Closing log file.

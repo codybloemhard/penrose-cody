@@ -30,6 +30,8 @@ use penrose::{
 
 use std::collections::{ HashSet, HashMap };
 
+// use tracing_subscriber::{ self, prelude::* };
+
 fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
     let mut raw_bindings = map! {
         map_keys: |k: &str| k.to_string();
@@ -145,6 +147,7 @@ impl Layout for Cols {
         for id in s {
             if l.is_none() { l = Some(*id); }
             else if r.is_none() { r = Some(*id); }
+            else { break; }
         }
 
         if let (Some(l), Some(r)) = (l, r) {
@@ -188,6 +191,7 @@ impl Ring {
         }
     }
 
+    // returns newly focused on id
     fn rotate(&mut self) -> Option<Xid> {
         if self.len() < 2 { None }
         else {
@@ -220,8 +224,8 @@ impl Rings {
 
     // returns (previously focused id needs to minimize, inserted into left column, new right col)
     fn insert(&mut self, id: Xid, focused: Option<Xid>, ws_label: &str) -> (bool, bool, bool) {
-        self.global.insert(id);
         if let Some(index) = self.map.get(ws_label) {
+            self.global.insert(id);
             let (l, r) = &mut self.workspaces[*index];
             if l.len() == 0 {
                 l.insert(id);
@@ -241,6 +245,7 @@ impl Rings {
         }
     }
 
+    // returns newly focused on id
     fn rotate(&mut self, focused: Xid, ws_label: &str) -> Option<Xid> {
         if let Some(index) = self.map.get(ws_label) {
             let (l, r) = &mut self.workspaces[*index];
@@ -262,6 +267,7 @@ fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Res
     let rings = state.extension::<Rings>()?;
     let cs = &mut state.client_set;
     let ws = cs.current_workspace();
+    if ws.layout_name() != "cols" { return Ok(()) }
     let fc = rings.borrow().last_focus;
     let (minimize, into_left, new_right_col) = rings.borrow_mut().insert(id, fc, ws.tag());
     // println!("{}:{:?}:{}", id, fc, ws.tag());
@@ -313,24 +319,32 @@ fn ring_rotate_r<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
         let cs = &mut state.client_set;
         let ws = cs.current_workspace();
         if ws.layout_name() != "cols" {
-            cs.focus_down();
+            cs.swap_down();
             return x.refresh(state)
         }
         let wstag = ws.tag().to_string();
         let fc = cs.current_client().copied();
         if let Some(fid) = fc {
-            if let Some(id) = rings.borrow_mut().rotate(fid, &wstag) {
+            let rid = rings.borrow_mut().rotate(fid, &wstag);
+            if let Some(id) = rid {
                 cs.move_client_to_tag(&fid, "reikai");
-                cs.move_client_to_tag(&id, &wstag);
-                cs.focus_client(&id);
+                cs.move_client_to_current_tag(&id);
                 return x.refresh(state);
             }
+            // written like this, it will compile but crash penrose!
+            // if let Some(id) = rings.borrow_mut().rotate(fid, &wstag) {
+            //     cs.move_client_to_tag(&fid, "reikai");
+            //     cs.move_client_to_current_tag(&id);
+            //     return x.refresh(state);
+            // }
         }
         Ok(())
     })
 }
 
 fn main() -> Result<()> {
+    // tracing_subscriber::fmt().with_env_filter("info").finish().init();
+
     let conn = RustConn::new()?;
     let key_bindings = parse_keybindings_with_xmodmap(raw_key_bindings())?;
 
