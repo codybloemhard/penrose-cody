@@ -18,7 +18,7 @@ use penrose::{
         actions::{ toggle_fullscreen },
         hooks::{ add_ewmh_hooks },
     },
-    x::{ XConn, XConnExt, query::AppName },
+    x::{ XConn, XConnExt, XEvent, query::AppName },
     pure::{ Stack, geometry::Rect },
     Xid,
     stack,
@@ -28,7 +28,7 @@ use penrose::{
     Result,
 };
 
-use std::collections::HashMap;
+use std::collections::{ HashSet, HashMap };
 
 fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
     let mut raw_bindings = map! {
@@ -44,7 +44,8 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-n" => toggle_fullscreen(),
         "M-o" => modify_with(|cs| cs.focus_down()),
         "M-a" => modify_with(|cs| cs.focus_up()),
-        "M-S-o" => modify_with(|cs| cs.swap_down()),
+        "M-S-o" => ring_rotate_r(),
+        // "M-S-o" => modify_with(|cs| cs.swap_down()),
         "M-S-a" => modify_with(|cs| cs.swap_up()),
         "M-S-q" => modify_with(|cs| cs.next_layout()),
         // "M-bracketright" => modify_with(|cs| cs.next_screen()),
@@ -74,8 +75,8 @@ fn layouts() -> LayoutStack {
     let gap_inner = 4;
     let bar_height = 24;
     stack!(
-        MainAndStack::side(1, 0.5, 0.05),
-        Cols::boxed()
+        Cols::boxed(),
+        MainAndStack::side(1, 0.5, 0.05)
     )
     .map(|l| ReserveTop::wrap(Gaps::wrap(l, gap_outer, gap_inner), bar_height))
 }
@@ -120,9 +121,8 @@ pub fn toggle_floating_focused_remember<X: XConn>() -> Box<dyn KeyEventHandler<X
         let r = Rect { x: 0, y: 0, w, h };
         let r = r.centered_in(&screen_rect).unwrap_or(r);
 
-        x.modify_and_refresh(state, |cs| {
-            let _ = cs.toggle_floating_state(id, r);
-        })
+        let _ = state.client_set.toggle_floating_state(id, r);
+        x.refresh(state)
     })
 }
 
@@ -163,6 +163,173 @@ impl Layout for Cols {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+struct Ring {
+    ring: Vec<Xid>,
+    focus: usize,
+}
+
+impl Ring {
+    fn focus(&self) -> Option<Xid> {
+        if self.ring.is_empty() { None }
+        else { Some(self.ring[self.focus]) }
+    }
+
+    fn len(&self) -> usize {
+        self.ring.len()
+    }
+
+    fn insert(&mut self, id: Xid) {
+        if self.ring.is_empty() {
+            self.ring.push(id);
+        } else {
+            self.ring.insert(self.focus + 1, id);
+            self.focus += 1;
+        }
+    }
+
+    fn rotate(&mut self) -> Option<Xid> {
+        if self.len() < 2 { None }
+        else {
+            self.focus += 1;
+            if self.focus >= self.len() {
+                self.focus = 0;
+            }
+            Some(self.ring[self.focus])
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+struct Rings {
+    workspaces: [(Ring, Ring); 4],
+    global: HashSet<Xid>,
+    map: HashMap<String, usize>,
+    last_focus: Option<Xid>,
+}
+
+impl Rings {
+    fn new() -> Self {
+        let mut rings = Self::default();
+        rings.map.insert("g".to_string(), 0);
+        rings.map.insert("m".to_string(), 1);
+        rings.map.insert("l".to_string(), 2);
+        rings.map.insert("w".to_string(), 3);
+        rings
+    }
+
+    // returns (previously focused id needs to minimize, inserted into left column, new right col)
+    fn insert(&mut self, id: Xid, focused: Option<Xid>, ws_label: &str) -> (bool, bool, bool) {
+        self.global.insert(id);
+        if let Some(index) = self.map.get(ws_label) {
+            let (l, r) = &mut self.workspaces[*index];
+            if l.len() == 0 {
+                l.insert(id);
+                (false, true, false)
+            } else if l.len() == 1 && r.len() == 0 {
+                r.insert(id);
+                (false, false, true)
+            } else if r.focus() == focused {
+                r.insert(id);
+                (true, false, false)
+            } else {
+                l.insert(id);
+                (true, true, false)
+            }
+        } else {
+            (false, false, false)
+        }
+    }
+
+    fn rotate(&mut self, focused: Xid, ws_label: &str) -> Option<Xid> {
+        if let Some(index) = self.map.get(ws_label) {
+            let (l, r) = &mut self.workspaces[*index];
+            if l.focus() == Some(focused) {
+                l.rotate()
+            } else if r.focus() == Some(focused) {
+                r.rotate()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
+fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
+    if x.query_or(false, &AppName("shapebar"), id) { return Ok(()) }
+    let rings = state.extension::<Rings>()?;
+    let cs = &mut state.client_set;
+    let ws = cs.current_workspace();
+    let fc = rings.borrow().last_focus;
+    let (minimize, into_left, new_right_col) = rings.borrow_mut().insert(id, fc, ws.tag());
+    // println!("{}:{:?}:{}", id, fc, ws.tag());
+    if let Some(fid) = fc {
+        if minimize && fid != id {
+            cs.move_client_to_tag(&fid, "m");
+        }
+    }
+    if into_left {
+        println!("into left: {}", id);
+    } else {
+        println!("into right: {}", id);
+    }
+    if new_right_col {
+        cs.rotate_down();
+    }
+    cs.focus_client(&id);
+    rings.borrow_mut().last_focus = Some(id);
+    Ok(())
+}
+
+pub fn rings_refresh<X: XConn + 'static>(state: &mut State<X>, _: &X) -> Result<()> {
+    let rings = state.extension::<Rings>()?;
+    let focus = state.client_set.current_client().copied();
+    if focus != rings.borrow().last_focus {
+        rings.borrow_mut().last_focus = focus;
+    }
+    Ok(())
+}
+
+// pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, _: &X) -> Result<bool> {
+//     println!("event: {}", event);
+//     if let XEvent::FocusIn(id) = event {
+//         let rings = state.extension::<Rings>()?;
+//         rings.borrow_mut().last_focus = Some(*id);
+//         println!("focus: {};", id);
+//     }
+//     if let XEvent::PropertyNotify(pe) = event {
+//         if pe.atom == "_NET_ACTIVE_WINDOW" {
+//             println!("active: {};", pe.id);
+//         }
+//     }
+//     Ok(true)
+// }
+
+fn ring_rotate_r<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
+    key_handler(|state, x: &X| {
+        let rings = state.extension::<Rings>()?;
+        let cs = &mut state.client_set;
+        let ws = cs.current_workspace();
+        if ws.layout_name() != "cols" {
+            cs.focus_down();
+            return x.refresh(state)
+        }
+        let wstag = ws.tag().to_string();
+        let fc = cs.current_client().copied();
+        if let Some(fid) = fc {
+            if let Some(id) = rings.borrow_mut().rotate(fid, &wstag) {
+                cs.move_client_to_tag(&fid, "reikai");
+                cs.move_client_to_tag(&id, &wstag);
+                cs.focus_client(&id);
+                return x.refresh(state);
+            }
+        }
+        Ok(())
+    })
+}
+
 fn main() -> Result<()> {
     let conn = RustConn::new()?;
     let key_bindings = parse_keybindings_with_xmodmap(raw_key_bindings())?;
@@ -172,8 +339,13 @@ fn main() -> Result<()> {
         focused_border: Color::new_from_hex(0xF7768EFF),
         border_width: 1,
         focus_follow_mouse: true,
-        tags: vec!["g".to_string(), "m".to_string(), "l".to_string(), "w".to_string()],
-        floating_classes: vec!["ffplay".to_string(), "notshapebar".to_string()],
+        tags: vec![
+            "g".to_string(), "m".to_string(), "l".to_string(), "w".to_string(),
+        ],
+        floating_classes: vec![
+            "ffplay".to_string(),
+            "notshapebar".to_string()
+        ],
         default_layouts: layouts(),
         // startup_hook: Some(SpawnOnStartup::boxed("~/scripts/.theme/run-shapebar")),
         ..Default::default()
@@ -181,9 +353,14 @@ fn main() -> Result<()> {
 
     config.compose_or_set_manage_hook(og_window_size_manage);
     config.compose_or_set_manage_hook(bar_hook);
+    config.compose_or_set_manage_hook(rings_manage);
+    config.compose_or_set_refresh_hook(rings_refresh);
+    // config.compose_or_set_event_hook(rings_event);
 
     let mut wm = WindowManager::new(config, key_bindings, HashMap::new(), conn)?;
     wm.state.add_extension(OgWindowSize::default());
+    wm.state.add_extension(Rings::new());
+    wm.state.client_set.add_invisible_workspace("reikai")?;
 
     wm.run()
 }
