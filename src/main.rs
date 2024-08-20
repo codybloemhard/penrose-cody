@@ -46,9 +46,9 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-n" => toggle_fullscreen(),
         "M-o" => modify_with(|cs| cs.focus_down()),
         "M-a" => modify_with(|cs| cs.focus_up()),
-        "M-S-o" => ring_rotate_r(),
-        // "M-S-o" => modify_with(|cs| cs.swap_down()),
-        "M-S-a" => modify_with(|cs| cs.swap_up()),
+        "M-S-o" => ring_rotate(true),
+        "M-S-a" => ring_rotate(false),
+        "M-S-u" => modify_with(|cs| cs.swap_up()),
         "M-S-q" => modify_with(|cs| cs.next_layout()),
         // "M-bracketright" => modify_with(|cs| cs.next_screen()),
         // "M-bracketleft" => modify_with(|cs| cs.previous_screen()),
@@ -136,7 +136,7 @@ impl Cols {
 }
 
 impl Layout for Cols {
-    fn name(&self) -> String { "cols".to_string() }
+    fn name(&self) -> String { "2col".to_string() }
     fn boxed_clone(&self) -> Box<dyn Layout> { Box::new(self.clone()) }
 
     fn layout(&mut self, s: &Stack<Xid>, rect: Rect) -> (Option<Box<dyn Layout>>, Vec<(Xid, Rect)>) {
@@ -192,13 +192,17 @@ impl Ring {
     }
 
     // returns newly focused on id
-    fn rotate(&mut self) -> Option<Xid> {
+    fn rotate(&mut self, right: bool) -> Option<Xid> {
         if self.len() < 2 { None }
         else {
-            self.focus += 1;
-            if self.focus >= self.len() {
-                self.focus = 0;
+            let mut f = (self.focus as i32) + if right { 1 } else { -1 };
+            if f >= self.len() as i32 {
+                f = 0;
             }
+            if f < 0 {
+                f = self.len() as i32 - 1;
+            }
+            self.focus = f as usize;
             Some(self.ring[self.focus])
         }
     }
@@ -245,19 +249,19 @@ impl Rings {
         }
     }
 
-    // returns newly focused on id
-    fn rotate(&mut self, focused: Xid, ws_label: &str) -> Option<Xid> {
+    // returns (newly focused on id, true if the right column rotated)
+    fn rotate(&mut self, focused: Xid, ws_label: &str, right: bool) -> (Option<Xid>, bool) {
         if let Some(index) = self.map.get(ws_label) {
             let (l, r) = &mut self.workspaces[*index];
             if l.focus() == Some(focused) {
-                l.rotate()
+                (l.rotate(right), false)
             } else if r.focus() == Some(focused) {
-                r.rotate()
+                (r.rotate(right), true)
             } else {
-                None
+                (None, false)
             }
         } else {
-            None
+            (None, false)
         }
     }
 }
@@ -267,13 +271,13 @@ fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Res
     let rings = state.extension::<Rings>()?;
     let cs = &mut state.client_set;
     let ws = cs.current_workspace();
-    if ws.layout_name() != "cols" { return Ok(()) }
+    if ws.layout_name() != "2col" { return Ok(()) }
     let fc = rings.borrow().last_focus;
     let (minimize, into_left, new_right_col) = rings.borrow_mut().insert(id, fc, ws.tag());
     // println!("{}:{:?}:{}", id, fc, ws.tag());
     if let Some(fid) = fc {
         if minimize && fid != id {
-            cs.move_client_to_tag(&fid, "m");
+            cs.move_client_to_tag(&fid, "reikai");
         }
     }
     if into_left {
@@ -313,30 +317,31 @@ pub fn rings_refresh<X: XConn + 'static>(state: &mut State<X>, _: &X) -> Result<
 //     Ok(true)
 // }
 
-fn ring_rotate_r<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
-    key_handler(|state, x: &X| {
+fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
+    key_handler(move |state, x: &X| {
         let rings = state.extension::<Rings>()?;
         let cs = &mut state.client_set;
         let ws = cs.current_workspace();
-        if ws.layout_name() != "cols" {
-            cs.swap_down();
+        if ws.layout_name() != "2col" {
+            if right {
+                cs.swap_down();
+            } else {
+                cs.swap_up();
+            }
             return x.refresh(state)
         }
         let wstag = ws.tag().to_string();
         let fc = cs.current_client().copied();
         if let Some(fid) = fc {
-            let rid = rings.borrow_mut().rotate(fid, &wstag);
+            let (rid, right_col) = rings.borrow_mut().rotate(fid, &wstag, right);
             if let Some(id) = rid {
                 cs.move_client_to_tag(&fid, "reikai");
                 cs.move_client_to_current_tag(&id);
+                if right_col {
+                    cs.swap_down();
+                }
                 return x.refresh(state);
             }
-            // written like this, it will compile but crash penrose!
-            // if let Some(id) = rings.borrow_mut().rotate(fid, &wstag) {
-            //     cs.move_client_to_tag(&fid, "reikai");
-            //     cs.move_client_to_current_tag(&id);
-            //     return x.refresh(state);
-            // }
         }
         Ok(())
     })
