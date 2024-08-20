@@ -28,7 +28,7 @@ use penrose::{
     Result,
 };
 
-use std::collections::{ HashSet, HashMap };
+use std::collections::{ HashMap };
 
 // use tracing_subscriber::{ self, prelude::* };
 
@@ -206,35 +206,51 @@ impl Ring {
             Some(self.ring[self.focus])
         }
     }
+
+    // returns an id if it needs to be switched in
+    fn delete(&mut self, id: Xid) -> Option<Xid> {
+        let ol = self.ring.len();
+        self.ring.retain(|&e| e != id);
+        let nl = self.ring.len();
+        if ol == nl { return None; }
+        let mut f = (self.focus as i32) - 1;
+        if f < 0 {
+            f = self.len() as i32 - 1;
+        }
+        if f < 0 {
+            f = 0;
+        }
+        self.focus = f as usize;
+        self.focus()
+    }
 }
 
 #[derive(Debug, Default, Clone)]
 struct Rings {
-    workspaces: [(Ring, Ring); 4],
-    global: HashSet<Xid>,
-    map: HashMap<String, usize>,
+    tags: [(Ring, Ring); 4],
+    tag_indices: HashMap<String, usize>,
+    tag_names: [String; 4],
     last_focus: Option<Xid>,
 }
 
 impl Rings {
     fn new() -> Self {
         let mut rings = Self::default();
-        rings.map.insert("g".to_string(), 0);
-        rings.map.insert("m".to_string(), 1);
-        rings.map.insert("l".to_string(), 2);
-        rings.map.insert("w".to_string(), 3);
+        for (i, tag) in ["g", "m", "l", "w"].iter().enumerate() {
+            rings.tag_indices.insert(tag.to_string(), i);
+            rings.tag_names[i] = tag.to_string();
+        }
         rings
     }
 
     // returns (previously focused id needs to minimize, inserted into left column, new right col)
     fn insert(&mut self, id: Xid, focused: Option<Xid>, ws_label: &str) -> (bool, bool, bool) {
-        if let Some(index) = self.map.get(ws_label) {
-            self.global.insert(id);
-            let (l, r) = &mut self.workspaces[*index];
+        if let Some(index) = self.tag_indices.get(ws_label) {
+            let (l, r) = &mut self.tags[*index];
             if l.len() == 0 {
                 l.insert(id);
                 (false, true, false)
-            } else if l.len() == 1 && r.len() == 0 {
+            } else if r.len() == 0 {
                 r.insert(id);
                 (false, false, true)
             } else if r.focus() == focused {
@@ -251,8 +267,8 @@ impl Rings {
 
     // returns (newly focused on id, true if the right column rotated)
     fn rotate(&mut self, focused: Xid, ws_label: &str, right: bool) -> (Option<Xid>, bool) {
-        if let Some(index) = self.map.get(ws_label) {
-            let (l, r) = &mut self.workspaces[*index];
+        if let Some(index) = self.tag_indices.get(ws_label) {
+            let (l, r) = &mut self.tags[*index];
             if l.focus() == Some(focused) {
                 (l.rotate(right), false)
             } else if r.focus() == Some(focused) {
@@ -263,6 +279,21 @@ impl Rings {
         } else {
             (None, false)
         }
+    }
+
+    // returns Option<(to be focused id, is right col, tag)>
+    fn delete(&mut self, id: Xid) -> Option<(Xid, bool, String)> {
+        for (i, tag) in self.tag_names.iter().enumerate() {
+            let (l, r) = &mut self.tags[i];
+            // currently it is illegal to have a client in multiple rings
+            if let Some(fid) = l.delete(id) {
+                return Some((fid, false, tag.clone()));
+            }
+            if let Some(fid) = r.delete(id) {
+                return Some((fid, true, tag.clone()));
+            }
+        }
+        None
     }
 }
 
@@ -286,7 +317,7 @@ fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Res
         println!("into right: {}", id);
     }
     if new_right_col {
-        cs.rotate_down();
+        cs.swap_down();
     }
     cs.focus_client(&id);
     rings.borrow_mut().last_focus = Some(id);
@@ -302,20 +333,21 @@ pub fn rings_refresh<X: XConn + 'static>(state: &mut State<X>, _: &X) -> Result<
     Ok(())
 }
 
-// pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, _: &X) -> Result<bool> {
-//     println!("event: {}", event);
-//     if let XEvent::FocusIn(id) = event {
-//         let rings = state.extension::<Rings>()?;
-//         rings.borrow_mut().last_focus = Some(*id);
-//         println!("focus: {};", id);
-//     }
-//     if let XEvent::PropertyNotify(pe) = event {
-//         if pe.atom == "_NET_ACTIVE_WINDOW" {
-//             println!("active: {};", pe.id);
-//         }
-//     }
-//     Ok(true)
-// }
+pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: &X) -> Result<bool> {
+    let rings = state.extension::<Rings>()?;
+    if let XEvent::Destroy(id) = event {
+        let res = rings.borrow_mut().delete(*id);
+        if let Some((fid, is_right, tag)) = res {
+            state.client_set.move_client_to_tag(id, "reikai");
+            state.client_set.move_client_to_tag(&fid, &tag);
+            if is_right {
+                state.client_set.swap_down();
+            }
+            let _ = x.refresh(state);
+        }
+    }
+    Ok(true)
+}
 
 fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
     key_handler(move |state, x: &X| {
@@ -374,7 +406,7 @@ fn main() -> Result<()> {
     config.compose_or_set_manage_hook(bar_hook);
     config.compose_or_set_manage_hook(rings_manage);
     config.compose_or_set_refresh_hook(rings_refresh);
-    // config.compose_or_set_event_hook(rings_event);
+    config.compose_or_set_event_hook(rings_event);
 
     let mut wm = WindowManager::new(config, key_bindings, HashMap::new(), conn)?;
     wm.state.add_extension(OgWindowSize::default());
