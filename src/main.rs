@@ -3,7 +3,6 @@ use penrose::{
         actions::{
             exit, modify_with, send_layout_message, spawn, key_handler,
         },
-        layout::messages::{ ExpandMain, ShrinkMain },
         layout::transformers::{ ReserveTop, Gaps },
     },
     core::{
@@ -47,8 +46,10 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-S-o" => ring_rotate(true),
         "M-S-a" => ring_rotate(false),
         "M-S-e" => swap_cols(),
-        // "M-bracketright" => modify_with(|cs| cs.next_screen()),
-        // "M-bracketleft" => modify_with(|cs| cs.previous_screen()),
+        "M-comma" => modify_with(|cs| cs.previous_screen()),
+        "M-period" => modify_with(|cs| cs.next_screen()),
+        "M-S-comma" => swap_ring(false),
+        "M-S-period" => swap_ring(true),
         "M-S-y" => log_status(),
         "M-S-t" => exit(),
     };
@@ -223,6 +224,27 @@ impl Ring {
             (false, Some(self.ring[self.focus]))
         }
     }
+
+    fn swap(&mut self, right: bool) {
+        if self.len() < 2 { return; }
+        if right {
+            if self.focus == self.ring.len() - 1 {
+                let x = self.ring.pop().unwrap();
+                self.ring.insert(0, x);
+                self.focus = 0;
+            } else {
+                self.ring.swap(self.focus, self.focus + 1);
+                self.focus += 1;
+            }
+        } else if self.focus == 0 {
+            let x = self.ring.remove(0);
+            self.ring.push(x);
+            self.focus = self.ring.len() - 1;
+        } else {
+            self.ring.swap(self.focus - 1, self.focus);
+            self.focus -= 1;
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -309,6 +331,18 @@ impl Rings {
         }
         false
     }
+
+    fn swap_ring(&mut self, focused: Option<Xid>, ws_label: &str, right: bool) {
+        if focused.is_none() { return; }
+        if let Some(index) = self.tag_indices.get(ws_label) {
+            let (l, r) = &mut self.tags[*index];
+            if l.focus() == focused {
+                l.swap(right)
+            } else if r.focus() == focused {
+                r.swap(right)
+            }
+        }
+    }
 }
 
 fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
@@ -393,6 +427,17 @@ fn swap_cols<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
             cs.swap_down();
             let _ = x.refresh(state);
         }
+        Ok(())
+    })
+}
+
+fn swap_ring<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
+    key_handler(move |state, _: &X|{
+        let rings = state.extension::<Rings>()?;
+        let cs = &mut state.client_set;
+        let wstag = cs.current_workspace().tag();
+        let fc = cs.current_client().copied();
+        rings.borrow_mut().swap_ring(fc, wstag, right);
         Ok(())
     })
 }
