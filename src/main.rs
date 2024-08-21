@@ -4,7 +4,6 @@ use penrose::{
             exit, modify_with, send_layout_message, spawn, key_handler,
         },
         layout::messages::{ ExpandMain, ShrinkMain },
-        layout::MainAndStack,
         layout::transformers::{ ReserveTop, Gaps },
     },
     core::{
@@ -36,7 +35,6 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
     let mut raw_bindings = map! {
         map_keys: |k: &str| k.to_string();
 
-        "M-S-t" => exit(),
         "M-h" => spawn("dmenu_run"),
         "M-b" => spawn("st"),
         "M-j" => spawn("firefox"),
@@ -48,12 +46,11 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-a" => modify_with(|cs| cs.focus_up()),
         "M-S-o" => ring_rotate(true),
         "M-S-a" => ring_rotate(false),
-        "M-S-u" => modify_with(|cs| cs.swap_up()),
-        "M-S-q" => modify_with(|cs| cs.next_layout()),
+        "M-S-e" => swap_cols(),
         // "M-bracketright" => modify_with(|cs| cs.next_screen()),
         // "M-bracketleft" => modify_with(|cs| cs.previous_screen()),
-        "M-S-k" => send_layout_message(|| ExpandMain),
-        "M-S-p" => send_layout_message(|| ShrinkMain),
+        "M-S-y" => log_status(),
+        "M-S-t" => exit(),
     };
 
     for tag in &["g", "m", "l", "w"] {
@@ -77,8 +74,7 @@ fn layouts() -> LayoutStack {
     let gap_inner = 4;
     let bar_height = 24;
     stack!(
-        Cols::boxed(),
-        MainAndStack::side(1, 0.5, 0.05)
+        Cols::boxed()
     )
     .map(|l| ReserveTop::wrap(Gaps::wrap(l, gap_outer, gap_inner), bar_height))
 }
@@ -207,12 +203,12 @@ impl Ring {
         }
     }
 
-    // returns an id if it needs to be switched in
-    fn delete(&mut self, id: Xid) -> Option<Xid> {
+    // returns (is empty due to deletion, id if it needs to be switched in)
+    fn delete(&mut self, id: Xid) -> (bool, Option<Xid>) {
         let ol = self.ring.len();
         self.ring.retain(|&e| e != id);
         let nl = self.ring.len();
-        if ol == nl { return None; }
+        if ol == nl { return (false, None); }
         let mut f = (self.focus as i32) - 1;
         if f < 0 {
             f = self.len() as i32 - 1;
@@ -221,7 +217,11 @@ impl Ring {
             f = 0;
         }
         self.focus = f as usize;
-        self.focus()
+        if self.ring.is_empty() {
+            (true, None)
+        } else {
+            (false, Some(self.ring[self.focus]))
+        }
     }
 }
 
@@ -285,15 +285,29 @@ impl Rings {
     fn delete(&mut self, id: Xid) -> Option<(Xid, bool, String)> {
         for (i, tag) in self.tag_names.iter().enumerate() {
             let (l, r) = &mut self.tags[i];
-            // currently it is illegal to have a client in multiple rings
-            if let Some(fid) = l.delete(id) {
-                return Some((fid, false, tag.clone()));
+            match l.delete(id) {
+                // currently it is illegal to have a client in multiple rings
+                (false, Some(fid)) => return Some((fid, false, tag.clone())),
+                (true, None) => std::mem::swap(l, r),
+                _ => {  },
             }
-            if let Some(fid) = r.delete(id) {
+            if let (_, Some(fid)) = r.delete(id) {
                 return Some((fid, true, tag.clone()));
             }
         }
         None
+    }
+
+    // returns true if a swap occured
+    fn swap_cols(&mut self, ws_label: &str) -> bool {
+        if let Some(index) = self.tag_indices.get(ws_label) {
+            let (l, r) = &mut self.tags[*index];
+            if l.len() > 0 && r.len() > 0 {
+                std::mem::swap(l, r);
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -302,7 +316,6 @@ fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Res
     let rings = state.extension::<Rings>()?;
     let cs = &mut state.client_set;
     let ws = cs.current_workspace();
-    if ws.layout_name() != "2col" { return Ok(()) }
     let fc = rings.borrow().last_focus;
     let (minimize, into_left, new_right_col) = rings.borrow_mut().insert(id, fc, ws.tag());
     // println!("{}:{:?}:{}", id, fc, ws.tag());
@@ -353,19 +366,10 @@ fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
     key_handler(move |state, x: &X| {
         let rings = state.extension::<Rings>()?;
         let cs = &mut state.client_set;
-        let ws = cs.current_workspace();
-        if ws.layout_name() != "2col" {
-            if right {
-                cs.swap_down();
-            } else {
-                cs.swap_up();
-            }
-            return x.refresh(state)
-        }
-        let wstag = ws.tag().to_string();
+        let wstag = cs.current_workspace().tag();
         let fc = cs.current_client().copied();
         if let Some(fid) = fc {
-            let (rid, right_col) = rings.borrow_mut().rotate(fid, &wstag, right);
+            let (rid, right_col) = rings.borrow_mut().rotate(fid, wstag, right);
             if let Some(id) = rid {
                 cs.move_client_to_tag(&fid, "reikai");
                 cs.move_client_to_current_tag(&id);
@@ -374,6 +378,52 @@ fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
                 }
                 return x.refresh(state);
             }
+        }
+        Ok(())
+    })
+}
+
+fn swap_cols<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
+    key_handler(move |state, x: &X|{
+        let rings = state.extension::<Rings>()?;
+        let cs = &mut state.client_set;
+        let wstag = cs.current_workspace().tag();
+        let need_swap = rings.borrow_mut().swap_cols(wstag);
+        if need_swap {
+            cs.swap_down();
+            let _ = x.refresh(state);
+        }
+        Ok(())
+    })
+}
+
+fn log_status<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
+    key_handler(move |state, _: &X| {
+        println!("status:");
+        let rings = state.extension::<Rings>()?;
+        let rings = rings.borrow();
+        println!("in rings: ");
+        for (i, (l, r)) in rings.tags.iter().enumerate() {
+            println!(" {}:", rings.tag_names[i]);
+            print!("  l: ");
+            for id in &l.ring {
+                print!("{}, ", id);
+            }
+            println!();
+            print!("  r: ");
+            for id in &r.ring {
+                print!("{}, ", id);
+            }
+            println!();
+        }
+        println!("in tags: ");
+        for tag in rings.tag_names.iter().chain([&"reikai".to_string()]) {
+            let ws = state.client_set.workspace(tag).unwrap();
+            print!(" {}: ", tag);
+            for id in ws.clients() {
+                print!("{}, ", id);
+            }
+            println!();
         }
         Ok(())
     })
