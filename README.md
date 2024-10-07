@@ -2,6 +2,7 @@
 
 todo:
 
+- fix: scratchpad undo when not visible
 - link/unlink scratchpad
 - summon scratchpad, swallow column
 - unsummon scratchpad, return to ring
@@ -10,7 +11,9 @@ todo:
 - ring killed upon first firefox window bug: moved to reikai but why?
 - fullscreen toggle sinks window
 - make fullscreen remove all other windows (support transparent windows)
+- remove border on fullscreen windows
 - bar in right position
+- bar remove border
 - move from tag A on screen 0 to tag B on screen 1 with navigation keys (like i3)
 - context dmenu:
   - yeet into reikai (current)
@@ -23,6 +26,6 @@ features:
 - rings
 - add new window into ring, swallow previous
 - scroll through ring
-- restore on close
+- unswallow on close
 - swap cols
 - swap ring elements

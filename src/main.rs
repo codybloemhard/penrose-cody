@@ -17,7 +17,7 @@ use penrose::{
         hooks::{ add_ewmh_hooks },
     },
     x::{ XConn, XConnExt, XEvent, query::AppName },
-    pure::{ Stack, geometry::Rect },
+    pure::{ Stack, StackSet, geometry::Rect },
     Xid,
     stack,
     Color,
@@ -50,6 +50,8 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-period" => modify_with(|cs| cs.next_screen()),
         "M-S-comma" => swap_ring(false),
         "M-S-period" => swap_ring(true),
+        "M-space" => toggle_scratchpad(),
+        "M-S-space" => link_scratchpad(),
         "M-S-y" => log_status(),
         "M-S-t" => exit(),
     };
@@ -170,13 +172,13 @@ struct Ring {
 }
 
 impl Ring {
+    fn len(&self) -> usize {
+        self.ring.len()
+    }
+
     fn focus(&self) -> Option<Xid> {
         if self.ring.is_empty() { None }
         else { Some(self.ring[self.focus]) }
-    }
-
-    fn len(&self) -> usize {
-        self.ring.len()
     }
 
     fn insert(&mut self, id: Xid) {
@@ -253,6 +255,8 @@ struct Rings {
     tag_indices: HashMap<String, usize>,
     tag_names: [String; 4],
     last_focus: Option<Xid>,
+    scratchpad: Option<Xid>,
+    // scratchpad_behind: Option<Xid>,
 }
 
 impl Rings {
@@ -263,6 +267,16 @@ impl Rings {
             rings.tag_names[i] = tag.to_string();
         }
         rings
+    }
+
+    fn is_focused_in_a_ring(&self, id: Xid) -> bool {
+        for (i, _) in self.tag_names.iter().enumerate() {
+            let (l, r) = &self.tags[i];
+            if l.focus() == Some(id) || r.focus() == Some(id) {
+                return true;
+            }
+        }
+        false
     }
 
     // returns (previously focused id needs to minimize, inserted into left column, new right col)
@@ -399,11 +413,22 @@ pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: 
 fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
     key_handler(move |state, x: &X| {
         let rings = state.extension::<Rings>()?;
+        // let sid = rings.borrow().scratchpad;
         let cs = &mut state.client_set;
-        let wstag = cs.current_workspace().tag();
+        let wstag = cs.current_workspace().tag().to_string();
         let fc = cs.current_client().copied();
         if let Some(fid) = fc {
-            let (rid, right_col) = rings.borrow_mut().rotate(fid, wstag, right);
+            // if let Some(sid) = sid {
+            //     if fid == sid {
+            //         rings.borrow_mut().delete(sid);
+            //     }
+            // }
+            let (rid, right_col) = rings.borrow_mut().rotate(fid, &wstag, right);
+            // if let Some(sid) = sid {
+            //     if fid == sid {
+            //         cs.move_client_to_tag(&sid, "reikai");
+            //     }
+            // }
             if let Some(id) = rid {
                 cs.move_client_to_tag(&fid, "reikai");
                 cs.move_client_to_current_tag(&id);
@@ -438,6 +463,62 @@ fn swap_ring<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
         let wstag = cs.current_workspace().tag();
         let fc = cs.current_client().copied();
         rings.borrow_mut().swap_ring(fc, wstag, right);
+        Ok(())
+    })
+}
+
+// fn delete_scratchpad(sid: Xid, rings: &mut Rings, cs: &mut StackSet<Xid>) {
+// }
+
+fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
+    key_handler(move |state, x: &X| {
+        let rings = state.extension::<Rings>()?;
+        let sid = if let Some(sid) = rings.borrow().scratchpad { sid }
+        else { return Ok(()); };
+        let cs = &mut state.client_set;
+        let on = rings.borrow().is_focused_in_a_ring(sid);
+        let wstag = cs.current_workspace().tag().to_string();
+        let focused = cs.current_client().copied();
+        if on {
+            cs.move_client_to_tag(&sid, "reikai");
+            let res = rings.borrow_mut().delete(sid);
+            if let Some((fid, is_right, tag)) = res {
+                cs.move_client_to_tag(&fid, &tag);
+                if is_right {
+                    cs.swap_down();
+                }
+            }
+            if let Some(fid) = focused {
+                if fid == sid {
+                    return x.refresh(state);
+                }
+            }
+        }
+        let _ = rings.borrow_mut().delete(sid);
+        let (minimize, is_left, new_right_col) = rings.borrow_mut().insert(sid, focused, &wstag);
+        if let Some(fid) = focused {
+            if minimize {
+                cs.move_client_to_tag(&fid, "reikai");
+            }
+        }
+        cs.move_client_to_current_tag(&sid);
+        if !is_left || new_right_col {
+            cs.swap_down();
+        }
+        cs.focus_client(&sid);
+        rings.borrow_mut().last_focus = Some(sid);
+        x.refresh(state)
+    })
+}
+
+fn link_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
+    key_handler(move |state, _: &X| {
+        let rings = state.extension::<Rings>()?;
+        let cs = &mut state.client_set;
+        let focused = cs.current_client().copied();
+        if let Some(fid) = focused {
+            rings.borrow_mut().scratchpad = Some(fid);
+        }
         Ok(())
     })
 }
