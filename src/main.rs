@@ -432,7 +432,12 @@ fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
         if let Some(fid) = fc {
             if let Some(sid) = sid {
                 if fid == sid {
-                    let _ = rings.borrow_mut().delete(sid);
+                    let res = rings.borrow_mut().delete(sid);
+                    if let Some((nfid, _, _)) = res {
+                        rebuild(rings.clone(), cs);
+                        cs.focus_client(&nfid);
+                        return x.refresh(state);
+                    }
                 }
             }
             let (nfid, _) = rings.borrow_mut().rotate(fid, &wstag, right);
@@ -470,9 +475,6 @@ fn swap_ring<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
         Ok(())
     })
 }
-
-// fn delete_scratchpad(sid: Xid, rings: &mut Rings, cs: &mut StackSet<Xid>) {
-// }
 
 fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
     key_handler(move |state, x: &X| {
