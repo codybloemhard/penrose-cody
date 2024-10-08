@@ -27,6 +27,8 @@ use penrose::{
 };
 
 use std::collections::{ HashMap };
+use std::sync::Arc;
+use std::cell::RefCell;
 
 // use tracing_subscriber::{ self, prelude::* };
 
@@ -256,7 +258,6 @@ struct Rings {
     tag_names: [String; 4],
     last_focus: Option<Xid>,
     scratchpad: Option<Xid>,
-    // scratchpad_behind: Option<Xid>,
 }
 
 impl Rings {
@@ -267,6 +268,19 @@ impl Rings {
             rings.tag_names[i] = tag.to_string();
         }
         rings
+    }
+
+    fn current_view(&self) -> Vec<(String, Vec<Xid>)> {
+        let mut res = Vec::new();
+        for (i, tname) in self.tag_names.iter().enumerate() {
+            let mut tag_windows = Vec::new();
+            let (l, r) = &self.tags[i];
+            let (l, r) = (l.focus(), r.focus());
+            if let Some(l) = l { tag_windows.push(l); }
+            if let Some(r) = r { tag_windows.push(r); }
+            res.push((tname.clone(), tag_windows));
+        }
+        res
     }
 
     fn is_focused_in_a_ring(&self, id: Xid) -> bool {
@@ -359,27 +373,27 @@ impl Rings {
     }
 }
 
+fn rebuild(rings: Arc<RefCell<Rings>>, cs: &mut StackSet<Xid>) {
+    let rings_state = rings.borrow().current_view();
+    for (tname, tview) in rings_state {
+        let wcs = cs.workspace(&tname).unwrap().clients().copied().collect::<Vec<_>>();
+        for xid in wcs {
+            cs.move_client_to_tag(&xid, "reikai");
+        }
+        for xid in tview.into_iter().rev() {
+            cs.move_client_to_tag(&xid, &tname);
+        }
+    }
+}
+
 fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
     if x.query_or(false, &AppName("shapebar"), id) { return Ok(()) }
     let rings = state.extension::<Rings>()?;
     let cs = &mut state.client_set;
     let ws = cs.current_workspace();
     let fc = rings.borrow().last_focus;
-    let (minimize, into_left, new_right_col) = rings.borrow_mut().insert(id, fc, ws.tag());
-    // println!("{}:{:?}:{}", id, fc, ws.tag());
-    if let Some(fid) = fc {
-        if minimize && fid != id {
-            cs.move_client_to_tag(&fid, "reikai");
-        }
-    }
-    if into_left {
-        println!("into left: {}", id);
-    } else {
-        println!("into right: {}", id);
-    }
-    if new_right_col {
-        cs.swap_down();
-    }
+    let _ = rings.borrow_mut().insert(id, fc, ws.tag());
+    rebuild(rings.clone(), cs);
     cs.focus_client(&id);
     rings.borrow_mut().last_focus = Some(id);
     Ok(())
@@ -396,14 +410,12 @@ pub fn rings_refresh<X: XConn + 'static>(state: &mut State<X>, _: &X) -> Result<
 
 pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: &X) -> Result<bool> {
     let rings = state.extension::<Rings>()?;
+    let cs = &mut state.client_set;
     if let XEvent::Destroy(id) = event {
         let res = rings.borrow_mut().delete(*id);
-        if let Some((fid, is_right, tag)) = res {
-            state.client_set.move_client_to_tag(id, "reikai");
-            state.client_set.move_client_to_tag(&fid, &tag);
-            if is_right {
-                state.client_set.swap_down();
-            }
+        if let Some((fid, _, _)) = res {
+            rebuild(rings, cs);
+            cs.focus_client(&fid);
             let _ = x.refresh(state);
         }
     }
@@ -413,30 +425,22 @@ pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: 
 fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
     key_handler(move |state, x: &X| {
         let rings = state.extension::<Rings>()?;
-        // let sid = rings.borrow().scratchpad;
+        let sid = rings.borrow().scratchpad;
         let cs = &mut state.client_set;
         let wstag = cs.current_workspace().tag().to_string();
         let fc = cs.current_client().copied();
         if let Some(fid) = fc {
-            // if let Some(sid) = sid {
-            //     if fid == sid {
-            //         rings.borrow_mut().delete(sid);
-            //     }
-            // }
-            let (rid, right_col) = rings.borrow_mut().rotate(fid, &wstag, right);
-            // if let Some(sid) = sid {
-            //     if fid == sid {
-            //         cs.move_client_to_tag(&sid, "reikai");
-            //     }
-            // }
-            if let Some(id) = rid {
-                cs.move_client_to_tag(&fid, "reikai");
-                cs.move_client_to_current_tag(&id);
-                if right_col {
-                    cs.swap_down();
+            if let Some(sid) = sid {
+                if fid == sid {
+                    let _ = rings.borrow_mut().delete(sid);
                 }
-                return x.refresh(state);
             }
+            let (nfid, _) = rings.borrow_mut().rotate(fid, &wstag, right);
+            rebuild(rings.clone(), cs);
+            if let Some(nfid) = nfid {
+                cs.focus_client(&nfid);
+            }
+            return x.refresh(state);
         }
         Ok(())
     })
@@ -480,31 +484,21 @@ fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
         let wstag = cs.current_workspace().tag().to_string();
         let focused = cs.current_client().copied();
         if on {
-            cs.move_client_to_tag(&sid, "reikai");
             let res = rings.borrow_mut().delete(sid);
-            if let Some((fid, is_right, tag)) = res {
-                cs.move_client_to_tag(&fid, &tag);
-                if is_right {
-                    cs.swap_down();
-                }
-            }
-            if let Some(fid) = focused {
-                if fid == sid {
-                    return x.refresh(state);
+            if let Some((nfid, _is_right, _tag)) = res {
+                if let Some(ofid) = focused {
+                    if ofid == sid {
+                        rebuild(rings.clone(), cs);
+                        cs.focus_client(&nfid);
+                        rings.borrow_mut().last_focus = Some(nfid);
+                        return x.refresh(state);
+                    }
                 }
             }
         }
         let _ = rings.borrow_mut().delete(sid);
-        let (minimize, is_left, new_right_col) = rings.borrow_mut().insert(sid, focused, &wstag);
-        if let Some(fid) = focused {
-            if minimize {
-                cs.move_client_to_tag(&fid, "reikai");
-            }
-        }
-        cs.move_client_to_current_tag(&sid);
-        if !is_left || new_right_col {
-            cs.swap_down();
-        }
+        let (_minimize, _is_left, _new_right_col) = rings.borrow_mut().insert(sid, focused, &wstag);
+        rebuild(rings.clone(), cs);
         cs.focus_client(&sid);
         rings.borrow_mut().last_focus = Some(sid);
         x.refresh(state)
