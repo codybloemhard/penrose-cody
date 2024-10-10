@@ -293,56 +293,47 @@ impl Rings {
         false
     }
 
-    // returns (previously focused id needs to minimize, inserted into left column, new right col)
-    fn insert(&mut self, id: Xid, focused: Option<Xid>, ws_label: &str) -> (bool, bool, bool) {
+    fn insert(&mut self, id: Xid, focused: Option<Xid>, ws_label: &str) {
         if let Some(index) = self.tag_indices.get(ws_label) {
             let (l, r) = &mut self.tags[*index];
             if l.len() == 0 {
                 l.insert(id);
-                (false, true, false)
-            } else if r.len() == 0 {
+            } else if r.len() == 0 || r.focus() == focused {
                 r.insert(id);
-                (false, false, true)
-            } else if r.focus() == focused {
-                r.insert(id);
-                (true, false, false)
             } else {
                 l.insert(id);
-                (true, true, false)
             }
-        } else {
-            (false, false, false)
         }
     }
 
-    // returns (newly focused on id, true if the right column rotated)
-    fn rotate(&mut self, focused: Xid, ws_label: &str, right: bool) -> (Option<Xid>, bool) {
+    // returns newly focused on id
+    fn rotate(&mut self, focused: Xid, ws_label: &str, right: bool) -> Option<Xid> {
         if let Some(index) = self.tag_indices.get(ws_label) {
             let (l, r) = &mut self.tags[*index];
             if l.focus() == Some(focused) {
-                (l.rotate(right), false)
+                l.rotate(right)
             } else if r.focus() == Some(focused) {
-                (r.rotate(right), true)
+                r.rotate(right)
             } else {
-                (None, false)
+                None
             }
         } else {
-            (None, false)
+            None
         }
     }
 
-    // returns Option<(to be focused id, is right col, tag)>
-    fn delete(&mut self, id: Xid) -> Option<(Xid, bool, String)> {
-        for (i, tag) in self.tag_names.iter().enumerate() {
+    // returns Option<to be focused id>
+    fn delete(&mut self, id: Xid) -> Option<Xid> {
+        for (i, _) in self.tag_names.iter().enumerate() {
             let (l, r) = &mut self.tags[i];
             match l.delete(id) {
                 // currently it is illegal to have a client in multiple rings
-                (false, Some(fid)) => return Some((fid, false, tag.clone())),
+                (false, Some(fid)) => return Some(fid),
                 (true, None) => std::mem::swap(l, r),
                 _ => {  },
             }
             if let (_, Some(fid)) = r.delete(id) {
-                return Some((fid, true, tag.clone()));
+                return Some(fid);
             }
         }
         None
@@ -392,7 +383,7 @@ fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Res
     let cs = &mut state.client_set;
     let ws = cs.current_workspace();
     let fc = rings.borrow().last_focus;
-    let _ = rings.borrow_mut().insert(id, fc, ws.tag());
+    rings.borrow_mut().insert(id, fc, ws.tag());
     rebuild(rings.clone(), cs);
     cs.focus_client(&id);
     rings.borrow_mut().last_focus = Some(id);
@@ -413,7 +404,7 @@ pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: 
     let cs = &mut state.client_set;
     if let XEvent::Destroy(id) = event {
         let res = rings.borrow_mut().delete(*id);
-        if let Some((fid, _, _)) = res {
+        if let Some(fid) = res {
             rebuild(rings, cs);
             cs.focus_client(&fid);
             let _ = x.refresh(state);
@@ -433,14 +424,14 @@ fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
             if let Some(sid) = sid {
                 if fid == sid {
                     let res = rings.borrow_mut().delete(sid);
-                    if let Some((nfid, _, _)) = res {
+                    if let Some(nfid) = res {
                         rebuild(rings.clone(), cs);
                         cs.focus_client(&nfid);
                         return x.refresh(state);
                     }
                 }
             }
-            let (nfid, _) = rings.borrow_mut().rotate(fid, &wstag, right);
+            let nfid = rings.borrow_mut().rotate(fid, &wstag, right);
             rebuild(rings.clone(), cs);
             if let Some(nfid) = nfid {
                 cs.focus_client(&nfid);
@@ -487,7 +478,7 @@ fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
         let focused = cs.current_client().copied();
         if on {
             let res = rings.borrow_mut().delete(sid);
-            if let Some((nfid, _is_right, _tag)) = res {
+            if let Some(nfid) = res {
                 if let Some(ofid) = focused {
                     if ofid == sid {
                         rebuild(rings.clone(), cs);
@@ -499,7 +490,7 @@ fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
             }
         }
         let _ = rings.borrow_mut().delete(sid);
-        let (_minimize, _is_left, _new_right_col) = rings.borrow_mut().insert(sid, focused, &wstag);
+        rings.borrow_mut().insert(sid, focused, &wstag);
         rebuild(rings.clone(), cs);
         cs.focus_client(&sid);
         rings.borrow_mut().last_focus = Some(sid);
