@@ -504,6 +504,13 @@ fn link_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
         let cs = &mut state.client_set;
         let focused = cs.current_client().copied();
         if let Some(fid) = focused {
+            let sp = rings.borrow().scratchpad;
+            if let Some(sp) = sp {
+                if sp == fid {
+                    rings.borrow_mut().scratchpad = None;
+                    return Ok(());
+                }
+            }
             rings.borrow_mut().scratchpad = Some(fid);
         }
         Ok(())

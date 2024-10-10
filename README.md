@@ -2,7 +2,6 @@
 
 todo:
 
-- unlink scratchpad
 - unfullscreen when navigate out
 - fullscreen toggle sinks window
 - make fullscreen remove all other windows (support transparent windows)
@@ -26,6 +25,7 @@ features:
 - swap cols
 - swap ring elements
 - link scratchpad
+- unlink scratchpad scratchpad is selected, leave it in its current ring
 - summon scratchpad, swallow window
 - unsummon scratchpad, return to ring
 - rotate on scratchpad, unsummon scratchpad
