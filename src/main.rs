@@ -486,15 +486,20 @@ fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
         let focused = cs.current_client().copied();
         if on {
             let res = rings.borrow_mut().delete(sid);
-            if let Some(nfid) = res {
-                if let Some(ofid) = focused {
-                    if ofid == sid {
-                        rebuild(rings.clone(), cs);
-                        cs.focus_client(&nfid);
-                        rings.borrow_mut().last_focus = Some(nfid);
-                        return x.refresh(state);
-                    }
+            rebuild(rings.clone(), cs);
+            let mut refresh = false;
+            if let Some(ofid) = focused {
+                if ofid == sid {
+                    refresh = true;
                 }
+            }
+            if let Some(nfid) = res {
+                cs.focus_client(&nfid);
+                rings.borrow_mut().last_focus = Some(nfid);
+                refresh = true;
+            }
+            if refresh {
+                return x.refresh(state);
             }
         }
         let _ = rings.borrow_mut().delete(sid);

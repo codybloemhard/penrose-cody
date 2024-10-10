@@ -2,7 +2,6 @@
 
 todo:
 
-- undo scratchpad when 1 ring on ws
 - unfullscreen when navigate out
 - fullscreen toggle sinks window
 - make fullscreen remove all other windows (support transparent windows)
