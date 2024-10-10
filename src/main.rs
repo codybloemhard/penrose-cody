@@ -403,6 +403,12 @@ pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: 
     let rings = state.extension::<Rings>()?;
     let cs = &mut state.client_set;
     if let XEvent::Destroy(id) = event {
+        let sid = rings.borrow().scratchpad;
+        if let Some(sid) = sid {
+            if sid == *id {
+                rings.borrow_mut().scratchpad = None;
+            }
+        }
         let res = rings.borrow_mut().delete(*id);
         if let Some(fid) = res {
             rebuild(rings, cs);
