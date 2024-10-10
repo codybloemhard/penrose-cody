@@ -435,6 +435,8 @@ fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
             rebuild(rings.clone(), cs);
             if let Some(nfid) = nfid {
                 cs.focus_client(&nfid);
+            } else {
+                cs.focus_client(&fid);
             }
             return x.refresh(state);
         }
