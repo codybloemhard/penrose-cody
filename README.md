@@ -2,9 +2,8 @@
 
 todo:
 
-- unfullscreen when navigate out
-- fullscreen toggle sinks window
 - make fullscreen remove all other windows (support transparent windows)
+- fullscreen toggle sinks window
 - remove border on fullscreen windows
 - bar in right position
 - bar remove border
@@ -14,6 +13,10 @@ todo:
   - insert from reikai (select)
   - swap ring out
 - ring killed upon first firefox window bug: moved to reikai but why?
+- unfullscreen when navigate out?
+
+
+// sgi_video_sync_scheduler_callback WARN ] Resetting the vblank schedulerX connection
 
 features:
 

@@ -16,7 +16,7 @@ use penrose::{
         actions::{ toggle_fullscreen },
         hooks::{ add_ewmh_hooks },
     },
-    x::{ XConn, XConnExt, XEvent, query::AppName },
+    x::{ XConn, XConnExt, XEvent, query::AppName, Atom, Prop },
     pure::{ Stack, StackSet, geometry::Rect },
     Xid,
     stack,
@@ -26,11 +26,11 @@ use penrose::{
     Result,
 };
 
-use std::collections::{ HashMap };
+use std::collections::{ HashMap, HashSet };
 use std::sync::Arc;
 use std::cell::RefCell;
 
-// use tracing_subscriber::{ self, prelude::* };
+use tracing_subscriber::{ self, prelude::* };
 
 fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
     let mut raw_bindings = map! {
@@ -258,6 +258,7 @@ struct Rings {
     tag_names: [String; 4],
     last_focus: Option<Xid>,
     scratchpad: Option<Xid>,
+    fullscreen: HashSet<Xid>,
 }
 
 impl Rings {
@@ -365,14 +366,27 @@ impl Rings {
 }
 
 fn rebuild(rings: Arc<RefCell<Rings>>, cs: &mut StackSet<Xid>) {
+    println!("rebuild!");
     let rings_state = rings.borrow().current_view();
+
     for (tname, tview) in rings_state {
+        println!("  {tname}");
         let wcs = cs.workspace(&tname).unwrap().clients().copied().collect::<Vec<_>>();
         for xid in wcs {
             cs.move_client_to_tag(&xid, "reikai");
         }
+        let mut put_on_screen = Vec::with_capacity(2);
         for xid in tview.into_iter().rev() {
+            if rings.borrow().fullscreen.contains(&xid) {
+                put_on_screen.clear();
+                put_on_screen.push(xid);
+                break;
+            }
+            put_on_screen.push(xid);
+        }
+        for xid in put_on_screen {
             cs.move_client_to_tag(&xid, &tname);
+            println!("    {xid}");
         }
     }
 }
@@ -402,19 +416,54 @@ pub fn rings_refresh<X: XConn + 'static>(state: &mut State<X>, _: &X) -> Result<
 pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: &X) -> Result<bool> {
     let rings = state.extension::<Rings>()?;
     let cs = &mut state.client_set;
-    if let XEvent::Destroy(id) = event {
-        let sid = rings.borrow().scratchpad;
-        if let Some(sid) = sid {
-            if sid == *id {
-                rings.borrow_mut().scratchpad = None;
+    match event {
+        XEvent::Destroy(id) => {
+            let sid = rings.borrow().scratchpad;
+            if let Some(sid) = sid {
+                if sid == *id {
+                    rings.borrow_mut().scratchpad = None;
+                }
             }
-        }
-        let res = rings.borrow_mut().delete(*id);
-        if let Some(fid) = res {
-            rebuild(rings, cs);
-            cs.focus_client(&fid);
-            let _ = x.refresh(state);
-        }
+            let res = rings.borrow_mut().delete(*id);
+            if let Some(fid) = res {
+                rebuild(rings, cs);
+                cs.focus_client(&fid);
+                x.refresh(state)?;
+            }
+        },
+        XEvent::ConfigureNotify(conf_event) => {
+            println!("config notify event!");
+            let xid = conf_event.id;
+            let net_wm_state = Atom::NetWmState.as_ref();
+            let full_screen = x.intern_atom(Atom::NetWmStateFullscreen.as_ref())?;
+            let wstate = match x.get_prop(xid, net_wm_state) {
+                Ok(Some(Prop::Cardinal(vals))) => vals,
+                _ => vec![],
+            };
+            let was_fullscreen = rings.borrow().fullscreen.contains(&xid);
+            let is_fullscreen = if wstate.contains(&full_screen) {
+                // rings.borrow_mut().fullscreen.insert(xid);
+                true
+            } else {
+                // rings.borrow_mut().fullscreen.remove(&xid);
+                false
+            };
+            let update = was_fullscreen != is_fullscreen;
+            // println!("{}: {}, {}, {}", xid, was_fullscreen, is_fullscreen, update);
+            // TODO
+            if update {
+                if is_fullscreen {
+                    rings.borrow_mut().fullscreen.insert(xid);
+                } else {
+                    rings.borrow_mut().fullscreen.remove(&xid);
+                }
+                rebuild(rings, cs);
+                // cs.focus_client(&xid);
+                x.refresh(state)?;
+                println!("UPDATED: {}", xid);
+            }
+        },
+        _ => { },
     }
     Ok(true)
 }
@@ -502,7 +551,7 @@ fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
                 return x.refresh(state);
             }
         }
-        let _ = rings.borrow_mut().delete(sid);
+        // let _ = rings.borrow_mut().delete(sid);
         rings.borrow_mut().insert(sid, focused, &wstag);
         rebuild(rings.clone(), cs);
         cs.focus_client(&sid);
@@ -563,7 +612,7 @@ fn log_status<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
 }
 
 fn main() -> Result<()> {
-    // tracing_subscriber::fmt().with_env_filter("info").finish().init();
+    tracing_subscriber::fmt().with_env_filter("info").finish().init();
 
     let conn = RustConn::new()?;
     let key_bindings = parse_keybindings_with_xmodmap(raw_key_bindings())?;
