@@ -7,6 +7,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-penrose = "0.3.6"
-# penrose = { path = "../penrose" }
+# penrose = "0.3.6"
+penrose = { path = "../penrose-updated" }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
