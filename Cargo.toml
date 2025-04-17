@@ -8,5 +8,6 @@ edition = "2021"
 
 [dependencies]
 # penrose = "0.3.6"
-penrose = { path = "../penrose-updated" }
+# penrose = { path = "../penrose-updated" }
+penrose = { path = "../penrose-upstream" }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

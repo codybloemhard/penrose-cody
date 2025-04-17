@@ -399,7 +399,6 @@ fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Res
     let fc = rings.borrow().last_focus;
     rings.borrow_mut().insert(id, fc, ws.tag());
     rebuild(rings.clone(), cs);
-    println!("c: fc rings_manage: {}", id);
     cs.focus_client(&id);
     rings.borrow_mut().last_focus = Some(id);
     Ok(())
@@ -428,13 +427,11 @@ pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: 
             let res = rings.borrow_mut().delete(*id);
             if let Some(fid) = res {
                 rebuild(rings, cs);
-                println!("c: fc rings_event destroy: {}", fid);
                 cs.focus_client(&fid);
                 x.refresh(state)?;
             }
         },
         XEvent::ConfigureNotify(conf_event) => {
-            // println!("config notify event!");
             let xid = conf_event.id;
             let net_wm_state = Atom::NetWmState.as_ref();
             let full_screen = x.intern_atom(Atom::NetWmStateFullscreen.as_ref())?;
@@ -446,21 +443,16 @@ pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: 
             let is_fullscreen = wstate.contains(&full_screen);
             let update = was_fullscreen != is_fullscreen;
 
-            // println!("{}: {}, {}, {}", xid, was_fullscreen, is_fullscreen, update);
-            // TODO
             if update {
                 if is_fullscreen {
                     rings.borrow_mut().fullscreen.insert(xid);
                 } else {
                     rings.borrow_mut().fullscreen.remove(&xid);
                 }
-                println!("c: fc rings_event !!!: {}", xid);
                 rebuild(rings, cs);
                 cs.focus_client(&xid);
                 x.refresh(state)?;
-                println!("UPDATED: {}", xid);
             }
-            // cs.focus_client(&xid);
         },
         _ => { },
     }
@@ -480,7 +472,6 @@ fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
                     let res = rings.borrow_mut().delete(sid);
                     if let Some(nfid) = res {
                         rebuild(rings.clone(), cs);
-                        println!("c: fc rings_rotate scratchpad: {}", nfid);
                         cs.focus_client(&nfid);
                         return x.refresh(state);
                     }
@@ -489,10 +480,8 @@ fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
             let nfid = rings.borrow_mut().rotate(fid, &wstag, right);
             rebuild(rings.clone(), cs);
             if let Some(nfid) = nfid {
-                println!("c: fc rings_rotate fullscreen some: {}", nfid);
                 cs.focus_client(&nfid);
             } else {
-                println!("c: fc rings_rotate fullscreen none: {}", fid);
                 cs.focus_client(&fid);
             }
             return x.refresh(state);
@@ -545,7 +534,6 @@ fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
                 }
             }
             if let Some(nfid) = res {
-                println!("c: fc toggle_scratchpad on: {}", nfid);
                 cs.focus_client(&nfid);
                 rings.borrow_mut().last_focus = Some(nfid);
                 refresh = true;
@@ -557,7 +545,6 @@ fn toggle_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
         // let _ = rings.borrow_mut().delete(sid);
         rings.borrow_mut().insert(sid, focused, &wstag);
         rebuild(rings.clone(), cs);
-        println!("c: fc toggle_scratchpad end: {}", sid);
         cs.focus_client(&sid);
         rings.borrow_mut().last_focus = Some(sid);
         x.refresh(state)
