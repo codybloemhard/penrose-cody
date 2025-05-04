@@ -43,15 +43,13 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-f" => modify_with(|cs| cs.kill_focused()),
         "M-S-f" => toggle_floating_focused_remember(),
         "M-n" => toggle_fullscreen(),
-        "M-o" => modify_with(|cs| cs.focus_down()),
-        "M-a" => modify_with(|cs| cs.focus_up()),
+        "M-o" => move_focus(false), // modify_with(|cs| cs.focus_down()),
+        "M-a" => move_focus(true), // modify_with(|cs| cs.focus_up()),
         "M-S-o" => ring_rotate(true),
         "M-S-a" => ring_rotate(false),
-        "M-S-e" => swap_cols(),
-        "M-comma" => modify_with(|cs| cs.previous_screen()),
-        "M-period" => modify_with(|cs| cs.next_screen()),
-        "M-S-comma" => swap_ring(false),
-        "M-S-period" => swap_ring(true),
+        "M-e" => swap_cols(),
+        "M-comma" => swap_ring(false),
+        "M-period" => swap_ring(true),
         "M-space" => toggle_scratchpad(),
         "M-S-space" => link_scratchpad(),
         "M-S-y" => log_status(),
@@ -261,6 +259,13 @@ struct Rings {
     fullscreen: HashSet<Xid>,
 }
 
+
+enum FocusMove<'a> {
+    Noop,
+    Id(Xid),
+    Tag(&'a str),
+}
+
 impl Rings {
     fn new() -> Self {
         let mut rings = Self::default();
@@ -292,6 +297,81 @@ impl Rings {
             }
         }
         false
+    }
+
+    fn get_left_or_right_or_only(&self, left: bool, ws_label: &str) -> Option<Xid> {
+        if let Some(index) = self.tag_indices.get(ws_label) {
+            let (l, r) = &self.tags[*index];
+            return match (l.focus(), r.focus(), left) {
+                (Some(xid), _, true) => Some(xid),
+                (None, Some(xid), true) => Some(xid),
+                (_, Some(xid), false) => Some(xid),
+                (Some(xid), None, false) => Some(xid),
+                _ => None,
+            }
+        }
+        None
+    }
+
+    fn move_focus<'a>(&self, move_left: bool, fid: Xid, ws_labels: &'a[String]) -> FocusMove<'a> {
+        let wsl = ws_labels.len();
+        let mut go_to_pos = 'x';
+        let mut go_to_ws = usize::MAX;
+        for (i, ws_label) in ws_labels.iter().enumerate() {
+            if let Some(index) = self.tag_indices.get(ws_label) {
+                let (l, r) = &self.tags[*index];
+                match (l.focus(), r.focus(), move_left) {
+                    (Some(f), _, true) if f == fid => {
+                        go_to_pos = 'r';
+                        go_to_ws = (i + wsl - 1) % wsl;
+                        break;
+                    },
+                    (Some(f), Some(nfid), false) if f == fid => return FocusMove::Id(nfid),
+                    (Some(f), None, false) if f == fid => {
+                        go_to_pos = 'l';
+                        go_to_ws = (i + 1) % wsl;
+                        break;
+                    },
+                    (Some(nfid), Some(f), true) if f == fid => return FocusMove::Id(nfid),
+                    (_, Some(f), false) if f == fid => {
+                        go_to_pos = 'l';
+                        go_to_ws = (i + 1) % wsl;
+                        break;
+                    },
+                    (None, Some(f), true) if f == fid => {
+                        go_to_pos = 'r';
+                        go_to_ws = (i + wsl - 1) % wsl;
+                        break;
+                    },
+                    _ => { },
+                }
+            }
+        }
+        if go_to_pos == 'x' {
+            return FocusMove::Noop;
+        }
+        if let Some(dst_ws) = self.tag_indices.get(&ws_labels[go_to_ws]) {
+            let (l, r) = &self.tags[*dst_ws];
+            if go_to_pos == 'l' {
+                if let Some(nfid) = l.focus() {
+                    return FocusMove::Id(nfid);
+                } else if let Some(nfid) = r.focus() {
+                    return FocusMove::Id(nfid);
+                } else {
+                    return FocusMove::Tag(&ws_labels[go_to_ws]);
+                }
+            }
+            if go_to_pos == 'r' {
+                if let Some(nfid) = r.focus() {
+                    return FocusMove::Id(nfid);
+                } else if let Some(nfid) = l.focus() {
+                    return FocusMove::Id(nfid);
+                } else {
+                    return FocusMove::Tag(&ws_labels[go_to_ws]);
+                }
+            }
+        }
+        FocusMove::Noop
     }
 
     fn insert(&mut self, id: Xid, focused: Option<Xid>, ws_label: &str) {
@@ -457,6 +537,29 @@ pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: 
         _ => { },
     }
     Ok(true)
+}
+
+fn move_focus<X: XConn>(left: bool) -> Box<dyn KeyEventHandler<X>> {
+    key_handler(move |state, x: &X| {
+        let rings = state.extension::<Rings>()?;
+        let cs = &mut state.client_set;
+        let wss = cs.on_screen_workspaces().map(|ws| ws.tag().to_string()).collect::<Vec<_>>();
+        let fc = cs.current_client().copied();
+        if let Some(fid) = fc {
+            match rings.borrow().move_focus(left, fid, &wss) {
+                FocusMove::Noop => { },
+                FocusMove::Id(nfid) => cs.focus_client(&nfid),
+                FocusMove::Tag(ws) => cs.focus_tag(ws),
+            }
+        } else {
+            cs.next_screen();
+            let wstag = cs.current_workspace().tag().to_string();
+            if let Some(nfid) = rings.borrow().get_left_or_right_or_only(!left, &wstag) {
+                cs.focus_client(&nfid);
+            }
+        }
+        x.refresh(state)
+    })
 }
 
 fn ring_rotate<X: XConn>(right: bool) -> Box<dyn KeyEventHandler<X>> {
