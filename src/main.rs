@@ -82,21 +82,6 @@ fn layouts() -> LayoutStack {
     .map(|l| ReserveTop::wrap(Gaps::wrap(l, gap_outer, gap_inner), bar_height))
 }
 
-fn bar_hook<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
-    if x.query_or(false, &AppName("shapebar"), id)
-    {
-        // let _ = x.set_client_border_color(id, Color::new_from_hex(0x000000FF));
-        let _ = x.modify_and_refresh(state, |cs| { cs.remove_client(&id); });
-        // let mut geo = x.client_geometry(id)?;
-        // geo.x = 0;
-        // geo.y = 0;
-        // // let new_geo = Rect { x: 0, y: 0, ..geo };
-        // x.position_client(id, geo)?;
-        // let _ = x.refresh(state);
-    }
-    Ok(())
-}
-
 #[derive(Debug, Default)]
 struct OgWindowSize {
     pub map: HashMap<Xid, (u32, u32)>,
@@ -106,6 +91,7 @@ fn og_window_size_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &
     let rect = x.client_geometry(id)?;
     let ows = state.extension::<OgWindowSize>()?;
     ows.borrow_mut().map.insert(id, (rect.w, rect.h));
+    state.client_set.sink(&id);
     Ok(())
 }
 
@@ -729,7 +715,6 @@ fn main() -> Result<()> {
     });
 
     config.compose_or_set_manage_hook(og_window_size_manage);
-    config.compose_or_set_manage_hook(bar_hook);
     config.compose_or_set_manage_hook(rings_manage);
     config.compose_or_set_refresh_hook(rings_refresh);
     config.compose_or_set_event_hook(rings_event);
