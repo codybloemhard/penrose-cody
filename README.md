@@ -1,4 +1,6 @@
-# penrose-cody
+# ringwm
+
+Window manager based on rings and super swallowing.
 
 todo:
 
@@ -6,6 +8,7 @@ todo:
   - yeet into reikai (current)
   - insert from reikai (select)
   - swap ring out
+- explain this stuff
 
 - ? move floating windows outside of rings, remember place to go back
 
@@ -13,8 +16,7 @@ todo:
 - bug: navigate with one fullscreen, cannot go in one direction from non fs ws
 - bug: ring killed upon first firefox window bug: moved to reikai but why?
 - bug: mpv window isn't draggable, fullscreen video only goes fullscreen in window
-
-// sgi_video_sync_scheduler_callback WARN ] Resetting the vblank schedulerX connection
+- bug: when fullscreen window is killed, other column remains in reikai until new column is spawned
 
 features:
 
