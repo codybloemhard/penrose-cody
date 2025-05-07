@@ -13,7 +13,6 @@ todo:
 - ? move floating windows outside of rings, remember place to go back
 
 - bug: fullscreen toggle sinks window
-- bug: navigate with one fullscreen, cannot go in one direction from non fs ws
 - bug: ring killed upon first firefox window bug: moved to reikai but why?
 - bug: mpv window isn't draggable, fullscreen video only goes fullscreen in window
 - bug: when fullscreen window is killed, other column remains in reikai until new column is spawned

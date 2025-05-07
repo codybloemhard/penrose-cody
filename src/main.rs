@@ -246,6 +246,7 @@ struct Rings {
 }
 
 
+#[derive(Clone, Copy)]
 enum FocusMove<'a> {
     Noop,
     Id(Xid),
@@ -300,64 +301,48 @@ impl Rings {
     }
 
     fn move_focus<'a>(&self, move_left: bool, fid: Xid, ws_labels: &'a[String]) -> FocusMove<'a> {
-        let wsl = ws_labels.len();
-        let mut go_to_pos = 'x';
-        let mut go_to_ws = usize::MAX;
-        for (i, ws_label) in ws_labels.iter().enumerate() {
+        let mut col_ring = Vec::new();
+        for ws_label in ws_labels {
             if let Some(index) = self.tag_indices.get(ws_label) {
                 let (l, r) = &self.tags[*index];
-                match (l.focus(), r.focus(), move_left) {
-                    (Some(f), _, true) if f == fid => {
-                        go_to_pos = 'r';
-                        go_to_ws = (i + wsl - 1) % wsl;
-                        break;
+                let (l, r) = (l.focus(), r.focus());
+                match (l, r) {
+                    (Some(lid), Some(rid)) => {
+                        if !self.fullscreen.contains(&rid) {
+                            col_ring.push(FocusMove::Id(lid));
+                        }
+                        if !self.fullscreen.contains(&lid) {
+                            col_ring.push(FocusMove::Id(rid));
+                        }
                     },
-                    (Some(f), Some(nfid), false) if f == fid => return FocusMove::Id(nfid),
-                    (Some(f), None, false) if f == fid => {
-                        go_to_pos = 'l';
-                        go_to_ws = (i + 1) % wsl;
-                        break;
-                    },
-                    (Some(nfid), Some(f), true) if f == fid => return FocusMove::Id(nfid),
-                    (_, Some(f), false) if f == fid => {
-                        go_to_pos = 'l';
-                        go_to_ws = (i + 1) % wsl;
-                        break;
-                    },
-                    (None, Some(f), true) if f == fid => {
-                        go_to_pos = 'r';
-                        go_to_ws = (i + wsl - 1) % wsl;
-                        break;
-                    },
-                    _ => { },
+                    (Some(lid), _) => col_ring.push(FocusMove::Id(lid)),
+                    (_, Some(rid)) => col_ring.push(FocusMove::Id(rid)),
+                    (_, _) => col_ring.push(FocusMove::Tag(ws_label)),
                 }
             }
         }
-        if go_to_pos == 'x' {
+        let mut focus_index = None;
+        for (i, col) in col_ring.iter().enumerate() {
+            if let FocusMove::Id(cid) = col {
+                if cid == &fid {
+                    focus_index = Some(i);
+                }
+            }
+        }
+        if focus_index.is_none() {
             return FocusMove::Noop;
         }
-        if let Some(dst_ws) = self.tag_indices.get(&ws_labels[go_to_ws]) {
-            let (l, r) = &self.tags[*dst_ws];
-            if go_to_pos == 'l' {
-                if let Some(nfid) = l.focus() {
-                    return FocusMove::Id(nfid);
-                } else if let Some(nfid) = r.focus() {
-                    return FocusMove::Id(nfid);
-                } else {
-                    return FocusMove::Tag(&ws_labels[go_to_ws]);
-                }
-            }
-            if go_to_pos == 'r' {
-                if let Some(nfid) = r.focus() {
-                    return FocusMove::Id(nfid);
-                } else if let Some(nfid) = l.focus() {
-                    return FocusMove::Id(nfid);
-                } else {
-                    return FocusMove::Tag(&ws_labels[go_to_ws]);
-                }
-            }
+        if let Some(fi) = focus_index {
+            let l = col_ring.len();
+            let nfi = if move_left {
+                fi + l - 1
+            } else {
+                fi + 1
+            };
+            col_ring[nfi % l]
+        } else {
+            FocusMove::Noop
         }
-        FocusMove::Noop
     }
 
     fn insert(&mut self, id: Xid, focused: Option<Xid>, ws_label: &str) {
