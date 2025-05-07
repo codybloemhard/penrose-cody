@@ -1,6 +1,7 @@
 # ringwm
 
 Window manager based on rings and super swallowing.
+Build on top of the Penrose tiling window manager library: <https://github.com/sminez/penrose>.
 
 todo:
 
@@ -13,9 +14,8 @@ todo:
 - ? move floating windows outside of rings, remember place to go back
 
 - bug: fullscreen toggle sinks window
-- bug: ring killed upon first firefox window bug: moved to reikai but why?
 - bug: mpv window isn't draggable, fullscreen video only goes fullscreen in window
-- bug: when fullscreen window is killed, other column remains in reikai until new column is spawned
+- ? bug: ring killed upon first firefox window bug: moved to reikai but why?
 
 features:
 

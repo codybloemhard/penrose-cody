@@ -381,11 +381,16 @@ impl Rings {
             match l.delete(id) {
                 // currently it is illegal to have a client in multiple rings
                 (false, Some(fid)) => return Some(fid),
-                (true, None) => std::mem::swap(l, r),
-                _ => {  },
+                (true, None) => {
+                    std::mem::swap(l, r);
+                    return l.focus();
+                }
+                _ => { },
             }
-            if let (_, Some(fid)) = r.delete(id) {
-                return Some(fid);
+            match r.delete(id) {
+                (_, Some(fid)) => return Some(fid),
+                (true, _) => return l.focus(),
+                _ => { },
             }
         }
         None
