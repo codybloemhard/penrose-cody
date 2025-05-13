@@ -75,9 +75,9 @@ You can subdivide your screen in many pieces but it is not that useful:
 - quickly opening a new terminal is a pain as it splits nicely sized windows and it is too small
   to do anything with, needing another operation (like fullscreen)
 - vertically split windows (rows instead of columns) are kinda useless
-  - text scrolls out of view way to quickly
-  - line wrapping is way less annoying than scrolling all the time
-  - what do I need all that width for? Display a picture of Yunocchi? I can just fullscreen her.
+  - text scrolls out of view too quickly
+  - line wrapping is less annoying than scrolling all the time
+  - if you need the width in rare cases, fullscreen does fine
 - two vertical windows per screen is perfect
   - not too much clutter
   - perfect width for programming (about 100 chars wide)
@@ -140,6 +140,30 @@ Rings solve all the problems.
   - windows swap out right in front of you
   - minimal body and eye movement
   - quickest context switching (for the human using it)
+
+Behaviour:
+
+- rotate on scratchpad:
+  It rotates to the next window in the ring.
+  This prevents having to undo the scratchpad first.
+  Scratchpad unsummons so that you only have to set the structure of the rings in your brain.
+  This makes moving around easily predictable.
+  You don't need to rotate back into the scratchpad, as you can just summon it.
+- rotate on fullscreen:
+  Rotates through the ring but keeps fullscreen status.
+  Again to prevent having to unfullscreen it first before moving, increasing speed.
+  The fullscreen status is kept because if you set a window fullscreen, it probably means that
+  the particular windows works better for you that way. Maybe it wasn't big enough.
+  If it were to go back to regular on rotation, it means that when rotating back into it you
+  would have to fullscreen it yet again.
+- sink windows on spawn:
+  This means every window is sunk into a ring upon creation.
+  It includes all windows including popup windows that usually keep floating.
+  - decreases clutter if a popup is spawned floating on top, a third window exists on screen
+  - more space for the popup content: e.g. file pickers can use the space well
+  - more focus on the popup: e.g. saving a file, you don't need to focus on other windows
+  - if need be, you can rotate back and forth extremely quickly as the popup is inserted right next
+    to the previous window
 
 ### Unnecessary features
 
