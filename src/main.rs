@@ -1,7 +1,7 @@
 use penrose::{
     builtin::{
         actions::{
-            exit, modify_with, send_layout_message, spawn, key_handler,
+            exit, modify_with, spawn, key_handler,
         },
         layout::transformers::{ ReserveTop, Gaps },
     },
@@ -43,8 +43,8 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-f" => modify_with(|cs| cs.kill_focused()),
         "M-S-f" => toggle_floating_focused_remember(),
         "M-n" => toggle_fullscreen(),
-        "M-o" => move_focus(false), // modify_with(|cs| cs.focus_down()),
-        "M-a" => move_focus(true), // modify_with(|cs| cs.focus_up()),
+        "M-o" => move_focus(false),
+        "M-a" => move_focus(true),
         "M-S-o" => ring_rotate(true),
         "M-S-a" => ring_rotate(false),
         "M-e" => swap_cols(),
@@ -85,32 +85,6 @@ fn layouts() -> LayoutStack {
 #[derive(Debug, Default)]
 struct OgWindowSize {
     pub map: HashMap<Xid, (u32, u32)>,
-}
-
-fn og_window_size_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
-    let rect = x.client_geometry(id)?;
-    let ows = state.extension::<OgWindowSize>()?;
-    ows.borrow_mut().map.insert(id, (rect.w, rect.h));
-    state.client_set.sink(&id);
-    Ok(())
-}
-
-pub fn toggle_floating_focused_remember<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
-    key_handler(|state, x: &X| {
-        let id = match state.client_set.current_client() {
-            Some(&id) => id,
-            None => return Ok(()),
-        };
-        let screen_rect = state.client_set.current_screen().geometry();
-
-        let ows = state.extension::<OgWindowSize>()?;
-        let (w, h) = *ows.borrow().map.get(&id).unwrap_or(&(512, 512));
-        let r = Rect { x: 0, y: 0, w, h };
-        let r = r.centered_in(&screen_rect).unwrap_or(r);
-
-        let _ = state.client_set.toggle_floating_state(id, r);
-        x.refresh(state)
-    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -447,6 +421,16 @@ fn rebuild(rings: Arc<RefCell<Rings>>, cs: &mut StackSet<Xid>) {
     }
 }
 
+// hooks
+
+fn og_window_size_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
+    let rect = x.client_geometry(id)?;
+    let ows = state.extension::<OgWindowSize>()?;
+    ows.borrow_mut().map.insert(id, (rect.w, rect.h));
+    state.client_set.sink(&id);
+    Ok(())
+}
+
 fn rings_manage<X: XConn + 'static>(id: Xid, state: &mut State<X>, x: &X) -> Result<()> {
     if x.query_or(false, &AppName("shapebar"), id) { return Ok(()) }
     let rings = state.extension::<Rings>()?;
@@ -514,6 +498,8 @@ pub fn rings_event<X: XConn + 'static>(event: &XEvent, state: &mut State<X>, x: 
     }
     Ok(true)
 }
+
+// actions
 
 fn move_focus<X: XConn>(left: bool) -> Box<dyn KeyEventHandler<X>> {
     key_handler(move |state, x: &X| {
@@ -649,6 +635,24 @@ fn link_scratchpad<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
     })
 }
 
+pub fn toggle_floating_focused_remember<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
+    key_handler(|state, x: &X| {
+        let id = match state.client_set.current_client() {
+            Some(&id) => id,
+            None => return Ok(()),
+        };
+        let screen_rect = state.client_set.current_screen().geometry();
+
+        let ows = state.extension::<OgWindowSize>()?;
+        let (w, h) = *ows.borrow().map.get(&id).unwrap_or(&(512, 512));
+        let r = Rect { x: 0, y: 0, w, h };
+        let r = r.centered_in(&screen_rect).unwrap_or(r);
+
+        let _ = state.client_set.toggle_floating_state(id, r);
+        x.refresh(state)
+    })
+}
+
 fn log_status<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
     key_handler(move |state, _: &X| {
         println!("status:");
@@ -695,12 +699,7 @@ fn main() -> Result<()> {
         tags: vec![
             "g".to_string(), "m".to_string(), "l".to_string(), "w".to_string(),
         ],
-        floating_classes: vec![
-            "ffplay".to_string(),
-            "notshapebar".to_string()
-        ],
         default_layouts: layouts(),
-        // startup_hook: Some(SpawnOnStartup::boxed("~/scripts/.theme/run-shapebar")),
         ..Default::default()
     });
 
