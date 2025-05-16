@@ -15,6 +15,7 @@ use penrose::{
     extensions::{
         actions::{ toggle_fullscreen },
         hooks::{ add_ewmh_hooks },
+        util::dmenu::{ DMenu, DMenuConfig, DMenuKind, MenuMatch },
     },
     x::{ XConn, XConnExt, XEvent, query::AppName, Atom, Prop },
     pure::{ Stack, StackSet, geometry::Rect },
@@ -48,6 +49,7 @@ fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
         "M-S-o" => ring_rotate(true),
         "M-S-a" => ring_rotate(false),
         "M-e" => swap_cols(),
+        "M-S-e" => action_menu(),
         "M-comma" => swap_ring(false),
         "M-period" => swap_ring(true),
         "M-space" => toggle_scratchpad(),
@@ -650,6 +652,44 @@ pub fn toggle_floating_focused_remember<X: XConn>() -> Box<dyn KeyEventHandler<X
 
         let _ = state.client_set.toggle_floating_state(id, r);
         x.refresh(state)
+    })
+}
+
+// TODO
+pub fn action_menu<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
+    key_handler(|state, x: &X| {
+        let rings = state.extension::<Rings>()?;
+        let cs = &mut state.client_set;
+        let sc_ix = cs.current_screen().index();
+        let dmenu = DMenu::new(
+            &DMenuConfig {
+                kind: DMenuKind::Suckless,
+                // custom_prompt: Some("action: ".to_string()),
+                ..Default::default()
+            },
+            sc_ix,
+        );
+        // let all_tags = state.client_set.ordered_tags();
+        let options = vec!["pop".to_string(), "insert".to_string(), "focus".to_string()];
+        if let Ok(MenuMatch::Line(_, choice)) = dmenu.build_menu(options) {
+            match choice.as_str() {
+                "pop" => {
+                    let lf_option = rings.borrow().last_focus;
+                    if let Some(lf) = lf_option {
+                        cs.move_client_to_tag(&lf, "reikai");
+                        let res = rings.borrow_mut().delete(lf);
+                        if let Some(fid) = res {
+                            rebuild(rings, cs);
+                            cs.focus_client(&fid);
+                            x.refresh(state)?;
+                        }
+                    }
+                },
+                "insert" => {},
+                _ => { },
+            }
+        }
+        Ok(())
     })
 }
 
