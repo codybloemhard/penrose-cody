@@ -664,7 +664,6 @@ pub fn action_menu<X: XConn>() -> Box<dyn KeyEventHandler<X>> {
         let dmenu = DMenu::new(
             &DMenuConfig {
                 kind: DMenuKind::Suckless,
-                // custom_prompt: Some("action: ".to_string()),
                 ..Default::default()
             },
             sc_ix,

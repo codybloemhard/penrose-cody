@@ -187,3 +187,30 @@ Behaviour:
 - config file
   - just edit the progam and compile it
   - don't change your config often: make a good one and set the muscle memory
+
+## Usage
+
+This is very much a tool developed for personal use and an exercise in design.
+Do not expect to be able to use this with little effort.
+
+- keybindings designed for an obscure keyboard layout, you will need to change them
+- only works for one or two screens, I think? (especially `move_focus` may misbehave)
+- may need to be build against the develop branch of Penrose at any given moment
+
+
+## License
+
+Copyright (C) 2025 Cody Bloemhard
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
